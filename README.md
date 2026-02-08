@@ -1,17 +1,19 @@
 # cli-team-bridge
 
-ACP multi-agent coordinator that lets Claude Code (or any MCP client) delegate tasks to external coding agents — Codex, Claude Code, and Droid (Factory) — over the [Agent Client Protocol](https://github.com/AcpProtocol/acp-sdk).
+ACP multi-agent coordinator that lets Claude Code (or any MCP client) delegate tasks to external coding agents — Codex, Claude Code, Gemini, Qwen, Droid (Factory), and Ollama — over the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol).
+
+Inspired by [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) — the built-in experimental feature for coordinating multiple Claude Code sessions. This project extends that concept across vendor boundaries, letting you orchestrate agents from OpenAI, Anthropic, Google, Alibaba, and local models (Ollama) through a single MCP bridge.
 
 ## What it does
 
 The bridge sits between your AI coding assistant and multiple external agents. You ask Claude Code to "have codex review this project" and the bridge:
 
-1. Spawns the ACP adapter process (e.g. `codex-acp`)
+1. Spawns the ACP adapter process (e.g. `codex-acp`, `gemini --experimental-acp`)
 2. Initializes an ACP session pointed at your project directory
 3. Sends your prompt to the agent
 4. Streams back the result
 
-All three agents can run concurrently — each gets its own child process.
+All agents can run concurrently — each gets its own isolated child process.
 
 ## Supported agents
 
@@ -73,7 +75,7 @@ Start a **new Claude Code session**, then use natural language:
 > List available agents from the bridge
 > Ask codex to review the code quality of cli-team-bridge
 > Have droid do a security analysis of my-project
-> Send all 3 agents to review cli-team-bridge concurrently
+> Send all 5 agents to review cli-team-bridge concurrently
 ```
 
 Claude Code gets 4 MCP tools:
@@ -300,6 +302,25 @@ Each `assign_task` call spawns a separate ACP adapter process. Multiple tasks ru
 | `src/result-writer.ts` | Writes task results back to JSON files |
 | `src/manifest.ts` | Generates bridge manifest for team discovery |
 | `src/logger.ts` | Crash-safe structured logger (stderr + file) |
+
+## Test results
+
+All 5 agent configurations tested concurrently on macOS (2026-02-08):
+
+| Agent | Model | Time | Task |
+|-------|-------|------|------|
+| **qwen** | coder-model | 10s | Source file listing |
+| **droid** | kimi-for-coding (Kimi) | 20s | Error handling review |
+| **claude-code** | opus | 30s | Architecture analysis |
+| **gemini** | gemini-3-pro | 35s | Security review (3 findings) |
+| **droid** | nemotron-3-nano (Ollama) | 70s | File listing (local inference) |
+
+## Acknowledgments
+
+- [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) — the inspiration for cross-vendor agent coordination
+- [Agent Client Protocol (ACP)](https://github.com/zed-industries/agent-client-protocol) — the open standard for agent-editor communication
+- [Zed IDE](https://zed.dev) — ACP adapter patterns (`codex-acp`, `claude-code-acp`)
+- [Factory/Droid](https://factory.ai) — multi-model custom routing and Ollama integration
 
 ## License
 
