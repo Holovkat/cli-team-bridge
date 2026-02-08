@@ -19,7 +19,7 @@ All three agents can run concurrently — each gets its own child process.
 |-------|---------|---------------|------|
 | **codex** | `codex-acp` | `gpt-5.3-codex` | OAuth (`codex login`) |
 | **claude-code** | `claude-code-acp` | `opus` | OAuth (`claude login`) |
-| **gemini** | `gemini --experimental-acp` | `gemini-2.5-pro` | OAuth (`gemini login`) |
+| **gemini** | `gemini --experimental-acp` | `gemini-3-pro` | OAuth (`gemini login`) |
 | **qwen** | `qwen --acp` | `qwen3-coder` | API key (`DASHSCOPE_API_KEY`) |
 | **droid** | `droid-acp` | `custom:kimi-for-coding-[Kimi]-7` | OAuth (`droid login`) |
 

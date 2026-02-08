@@ -30,8 +30,10 @@
       "command": "gemini",
       "args": ["--experimental-acp"],
       "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
-      "defaultModel": "gemini-2.5-pro",
+      "defaultModel": "gemini-3-pro",
       "models": {
+        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro" },
+        "gemini-3-flash": { "flag": "--model", "value": "gemini-3-flash" },
         "gemini-2.5-pro": { "flag": "--model", "value": "gemini-2.5-pro" },
         "gemini-2.5-flash": { "flag": "--model", "value": "gemini-2.5-flash" }
       },
