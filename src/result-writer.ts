@@ -25,8 +25,7 @@ export async function writeTaskResult(
   try {
     const acquired = await lock.acquire()
     if (!acquired) {
-      logger.error(`Could not acquire lock to write result for ${filePath}`)
-      return
+      throw new Error(`Could not acquire lock to write result for ${filePath}`)
     }
 
     const raw = readFileSync(filePath, 'utf-8')
@@ -42,7 +41,7 @@ export async function writeTaskResult(
     }
 
     task.result = { ...result, output: truncatedOutput }
-    task.status = result.status === 'completed' ? 'completed' : 'in_progress'
+    task.status = result.status === 'completed' ? 'completed' : 'failed'
 
     // Atomic write: temp file + rename
     const tmpPath = filePath + '.tmp'
@@ -62,7 +61,9 @@ export async function markTaskInProgress(filePath: string, taskDir: string): Pro
 
   try {
     const acquired = await lock.acquire()
-    if (!acquired) return
+    if (!acquired) {
+      throw new Error(`Could not acquire lock to mark in_progress for ${filePath}`)
+    }
 
     const raw = readFileSync(filePath, 'utf-8')
     const task = JSON.parse(raw)

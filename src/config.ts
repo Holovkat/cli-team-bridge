@@ -4,7 +4,7 @@ import { logger } from './logger'
 export interface ModelConfig {
   flag: string
   value: string
-  keyEnv: string
+  keyEnv?: string
   provider?: string
 }
 
@@ -20,6 +20,7 @@ export interface AgentConfig {
 }
 
 export interface BridgeConfig {
+  workspaceRoot: string
   agents: Record<string, AgentConfig>
   permissions: { autoApprove: boolean }
   polling: { intervalMs: number }
@@ -47,9 +48,12 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
       throw new Error(`Agent "${name}" defaultModel "${agent.defaultModel}" not in models`)
     }
 
-    for (const [modelName, model] of Object.entries(agent.models)) {
-      if (!process.env[model.keyEnv]) {
-        logger.warn(`Agent "${name}" model "${modelName}" — env var ${model.keyEnv} not set`)
+    // Only warn about missing env vars for non-ACP agents (ACP adapters use their own OAuth)
+    if (agent.type !== 'acp') {
+      for (const [modelName, model] of Object.entries(agent.models)) {
+        if (model.keyEnv && !process.env[model.keyEnv]) {
+          logger.warn(`Agent "${name}" model "${modelName}" — env var ${model.keyEnv} not set`)
+        }
       }
     }
   }
@@ -64,7 +68,7 @@ export function getAvailableModels(agent: AgentConfig): string[] {
     return Object.keys(agent.models)
   }
   return Object.entries(agent.models)
-    .filter(([_, m]) => !!process.env[m.keyEnv])
+    .filter(([_, m]) => m.keyEnv && !!process.env[m.keyEnv])
     .map(([name]) => name)
 }
 

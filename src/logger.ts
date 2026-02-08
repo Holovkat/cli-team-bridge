@@ -1,3 +1,5 @@
+import { appendFileSync, appendFile } from 'fs'
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 const LEVELS: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
@@ -14,23 +16,35 @@ function formatMessage(level: LogLevel, message: string): string {
   return `[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`
 }
 
-async function writeToFile(formatted: string) {
+function writeToFileSync(formatted: string) {
   if (!logFile) return
   try {
-    await Bun.write(Bun.file(logFile), formatted + '\n', { append: true } as any)
+    appendFileSync(logFile, formatted + '\n')
   } catch {
-    // Fallback: append via file API
-    const file = Bun.file(logFile)
-    const existing = await file.exists() ? await file.text() : ''
-    await Bun.write(logFile, existing + formatted + '\n')
+    // Cannot write to log file — nowhere safe to report this
   }
+}
+
+function writeToFileAsync(formatted: string) {
+  if (!logFile) return
+  appendFile(logFile, formatted + '\n', () => {
+    // Fire and forget — errors silently ignored for non-critical log levels
+  })
 }
 
 function log(level: LogLevel, message: string) {
   if (LEVELS[level] < LEVELS[currentLevel]) return
   const formatted = formatMessage(level, message)
-  console[level === 'debug' ? 'log' : level](formatted)
-  writeToFile(formatted)
+
+  // Always use console.error to avoid corrupting MCP JSON-RPC on stdout
+  console.error(formatted)
+
+  // Use sync writes for error/warn (crash safety), async for info/debug
+  if (level === 'error' || level === 'warn') {
+    writeToFileSync(formatted)
+  } else {
+    writeToFileAsync(formatted)
+  }
 }
 
 export const logger = {

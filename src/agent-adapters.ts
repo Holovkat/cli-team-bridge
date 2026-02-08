@@ -15,9 +15,9 @@ export function buildSpawnConfig(
   // Build env: pass through required API keys
   const env: Record<string, string> = {}
 
-  // Pass all model-related API keys
+  // Pass model-related API keys (if configured — ACP/OAuth adapters typically don't need them)
   for (const [_, model] of Object.entries(agent.models)) {
-    if (process.env[model.keyEnv]) {
+    if (model.keyEnv && process.env[model.keyEnv]) {
       env[model.keyEnv] = process.env[model.keyEnv]!
     }
   }

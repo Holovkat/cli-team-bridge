@@ -31,6 +31,30 @@ export interface ToolCallInfo {
 }
 
 const TASK_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+const INIT_TIMEOUT_MS = 30 * 1000 // 30 seconds for initialize/newSession
+const MAX_STDERR_BYTES = 64 * 1024 // 64KB cap on stderr buffer
+
+/** Safely kill a process — no-op if already dead */
+function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
+  try {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill(signal)
+    }
+  } catch {
+    // Process already dead — ignore
+  }
+}
+
+/** Race a promise against a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val) },
+      (err) => { clearTimeout(timer); reject(err) },
+    )
+  })
+}
 
 // Convert Node.js streams to Web Streams (same pattern as claude-code-acp)
 function nodeToWebWritable(nodeStream: Writable): WritableStream<Uint8Array> {
@@ -91,28 +115,41 @@ export async function runAcpSession(
     return { output: '', error: `Failed to spawn: ${err}`, timedOut: false, stopReason: null, toolCalls: [] }
   }
 
-  // Capture stderr for diagnostics
+  // 2. Process lifecycle promise — rejects on spawn error or unexpected exit
+  const processExited = new Promise<never>((_resolve, reject) => {
+    proc.on('error', (err) => {
+      reject(new Error(`ACP adapter process error (${config.command}): ${err.message}`))
+    })
+    proc.on('close', (code, signal) => {
+      reject(new Error(`ACP adapter exited unexpectedly: code=${code} signal=${signal}`))
+    })
+  })
+
+  // Capture stderr for diagnostics, capped at MAX_STDERR_BYTES
   proc.stderr?.on('data', (chunk: Buffer) => {
-    stderr += chunk.toString()
+    if (stderr.length < MAX_STDERR_BYTES) {
+      stderr += chunk.toString().slice(0, MAX_STDERR_BYTES - stderr.length)
+    }
   })
 
   // Timeout handler
+  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
   const timeoutHandle = setTimeout(() => {
     timedOut = true
     logger.warn(`ACP session timed out after ${TASK_TIMEOUT_MS}ms, killing process`)
-    proc.kill('SIGTERM')
-    setTimeout(() => proc.kill('SIGKILL'), 5000)
+    safeKill(proc, 'SIGTERM')
+    sigkillTimer = setTimeout(() => safeKill(proc, 'SIGKILL'), 5000)
   }, TASK_TIMEOUT_MS)
 
   try {
-    // 2. Create NDJSON stream from child process stdin/stdout
+    // 3. Create NDJSON stream from child process stdin/stdout
     // Cast to any to bridge Node.js/Web stream type differences (same as Zed adapters)
     const stream = ndJsonStream(
       nodeToWebWritable(proc.stdin as Writable) as any,
       nodeToWebReadable(proc.stdout as Readable) as any,
     )
 
-    // 3. Create ClientSideConnection with our Client implementation
+    // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
         // Auto-approve all permission requests (bridge runs in trusted mode)
@@ -162,27 +199,42 @@ export async function runAcpSession(
       stream,
     )
 
-    // 4. Initialize — negotiate protocol version and capabilities
+    // 5. Initialize — negotiate protocol version and capabilities
+    //    Race against process lifecycle + 30s timeout
     logger.info('Sending ACP initialize...')
-    const initResult = await connection.initialize({
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: 'cli-team-bridge', version: '0.1.0' },
-    } as any)
+    const initResult = await Promise.race([
+      withTimeout(
+        connection.initialize({
+          protocolVersion: 1,
+          clientCapabilities: {},
+          clientInfo: { name: 'cli-team-bridge', version: '0.1.0' },
+        } as any),
+        INIT_TIMEOUT_MS,
+        'ACP initialize',
+      ),
+      processExited,
+    ])
 
     logger.info(`ACP initialized: ${(initResult as any).agentInfo?.name ?? 'unknown'} v${(initResult as any).agentInfo?.version ?? '?'}`)
 
-    // 5. Create new session
+    // 6. Create new session — race against process lifecycle + 30s timeout
     logger.info('Creating ACP session...')
-    const session = await connection.newSession({
-      cwd: config.cwd,
-      mcpServers: [],
-    } as any)
+    const session = await Promise.race([
+      withTimeout(
+        connection.newSession({
+          cwd: config.cwd,
+          mcpServers: [],
+        } as any),
+        INIT_TIMEOUT_MS,
+        'ACP newSession',
+      ),
+      processExited,
+    ])
 
     const sessionId = (session as any).sessionId
     logger.info(`ACP session created: ${sessionId}`)
 
-    // 6. Set model if requested and available
+    // 7. Set model if requested and available
     if (modelId && (session as any).models?.availableModels) {
       const available = (session as any).models.availableModels as any[]
       const match = available.find((m: any) => m.modelId === modelId || m.name === modelId)
@@ -201,25 +253,30 @@ export async function runAcpSession(
       }
     }
 
-    // 7. Send prompt and wait for completion
+    // 8. Send prompt and wait for completion — race against process lifecycle
     logger.info('Sending ACP prompt...')
-    const result = await connection.prompt({
-      sessionId,
-      prompt: [{ type: 'text', text: prompt }],
-    } as any)
+    const result = await Promise.race([
+      connection.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: prompt }],
+      } as any),
+      processExited,
+    ])
 
     const stopReason = (result as any).stopReason ?? null
     logger.info(`ACP prompt completed: stopReason=${stopReason}`)
 
     clearTimeout(timeoutHandle)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
 
     // Kill the process gracefully
-    proc.kill('SIGTERM')
+    safeKill(proc)
 
     return { output, error: null, timedOut: false, stopReason, toolCalls }
   } catch (err) {
     clearTimeout(timeoutHandle)
-    proc.kill('SIGTERM')
+    if (sigkillTimer) clearTimeout(sigkillTimer)
+    safeKill(proc)
 
     const errorMsg = `ACP session error: ${err}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
     logger.error(errorMsg)

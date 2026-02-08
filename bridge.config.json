@@ -1,16 +1,17 @@
 {
+  "workspaceRoot": "/workspace",
   "agents": {
     "codex": {
       "type": "acp",
       "command": "codex-acp",
       "args": [],
       "cwd": "/app",
-      "defaultModel": "gpt-5.2-codex",
+      "defaultModel": "gpt-5.3-codex",
       "models": {
-        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "keyEnv": "OPENAI_API_KEY" },
-        "gpt-4o": { "flag": "--model", "value": "gpt-4o", "keyEnv": "OPENAI_API_KEY" },
-        "o3": { "flag": "--model", "value": "o3", "keyEnv": "OPENAI_API_KEY" },
-        "o4-mini": { "flag": "--model", "value": "o4-mini", "keyEnv": "OPENAI_API_KEY" }
+        "gpt-5.3-codex": { "flag": "--model", "value": "gpt-5.3-codex" },
+        "gpt-4o": { "flag": "--model", "value": "gpt-4o" },
+        "o3": { "flag": "--model", "value": "o3" },
+        "o4-mini": { "flag": "--model", "value": "o4-mini" }
       },
       "strengths": ["code generation", "refactoring", "debugging"]
     },
@@ -21,9 +22,9 @@
       "cwd": "/app",
       "defaultModel": "opus",
       "models": {
-        "opus": { "flag": "--model", "value": "opus", "keyEnv": "ANTHROPIC_API_KEY" },
-        "sonnet": { "flag": "--model", "value": "sonnet", "keyEnv": "ANTHROPIC_API_KEY" },
-        "haiku": { "flag": "--model", "value": "haiku", "keyEnv": "ANTHROPIC_API_KEY" }
+        "opus": { "flag": "--model", "value": "opus" },
+        "sonnet": { "flag": "--model", "value": "sonnet" },
+        "haiku": { "flag": "--model", "value": "haiku" }
       },
       "strengths": ["architecture", "complex reasoning", "code review"]
     },
@@ -32,13 +33,13 @@
       "command": "droid-acp",
       "args": [],
       "cwd": "/app",
-      "defaultModel": "claude-opus-4-6",
+      "defaultModel": "custom:kimi-for-coding-[Kimi]-7",
       "models": {
-        "claude-opus-4-6": { "flag": "--model", "value": "claude-opus-4-6", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
-        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
-        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro-preview", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
-        "glm-4.7": { "flag": "--model", "value": "glm-4.7", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
-        "kimi-k2.5": { "flag": "--model", "value": "kimi-k2.5", "keyEnv": "FACTORY_API_KEY", "provider": "factory" }
+        "custom:kimi-for-coding-[Kimi]-7": { "flag": "--model", "value": "custom:kimi-for-coding-[Kimi]-7", "provider": "factory" },
+        "claude-opus-4-6": { "flag": "--model", "value": "claude-opus-4-6", "provider": "factory" },
+        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "provider": "factory" },
+        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro-preview", "provider": "factory" },
+        "glm-4.7": { "flag": "--model", "value": "glm-4.7", "provider": "factory" }
       },
       "strengths": ["multi-model flexibility", "cost optimization", "custom model support"]
     }
