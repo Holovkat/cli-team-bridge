@@ -22,7 +22,7 @@ All agents can run concurrently — each gets its own isolated child process.
 | **codex** | `codex-acp` | `gpt-5.3-codex` | OAuth (`codex login`) |
 | **claude-code** | `claude-code-acp` | `opus` | OAuth (`claude login`) |
 | **gemini** | `gemini --experimental-acp` | `gemini-3-pro` | OAuth (`gemini login`) |
-| **qwen** | `qwen --acp` | `coder-model` | API key (`DASHSCOPE_API_KEY`) |
+| **qwen** | `qwen --acp` | `coder-model` | OAuth (`qwen login`) |
 | **droid** | `droid-acp` | `custom:kimi-for-coding-[Kimi]-7` | OAuth (`droid login`) |
 
 Each agent supports multiple models — see [Configuration](#configuration) for the full list. Gemini and Qwen have built-in ACP support (no separate adapter binary needed).
@@ -47,7 +47,7 @@ Each agent supports multiple models — see [Configuration](#configuration) for 
   npm install -g @google/gemini-cli@latest
   npm install -g qwen-code@latest
   ```
-- Each agent authenticated via their respective flow (`codex login`, `claude login`, `gemini login`, `droid login`, or `DASHSCOPE_API_KEY` for Qwen)
+- Each agent authenticated via their respective flow (`codex login`, `claude login`, `gemini login`, `qwen login`, `droid login`)
 
 ## Installation
 
@@ -254,7 +254,6 @@ Set in `.env` or pass directly:
 OPENAI_API_KEY=...      # Optional: for codex API key auth
 ANTHROPIC_API_KEY=...   # Optional: for claude-code API key auth
 GOOGLE_API_KEY=...      # Optional: for gemini API key auth
-DASHSCOPE_API_KEY=...   # Required for qwen
 OLLAMA_HOST=...         # Optional: for local model proxying
 ```
 
