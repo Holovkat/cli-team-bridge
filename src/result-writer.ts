@@ -1,5 +1,4 @@
 import { readFileSync, renameSync } from 'fs'
-import { join, dirname } from 'path'
 import { LockManager } from './lock-manager'
 import { logger } from './logger'
 

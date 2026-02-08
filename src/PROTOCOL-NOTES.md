@@ -47,7 +47,7 @@ Bridge (ClientSideConnection) <--NDJSON/stdio--> claude-code-acp | codex-acp | d
 - Supports modes: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`
 - Auth via `ANTHROPIC_API_KEY` env var or `claude /login`
 - Model selection via `session/new` response → `setSessionModel()`
-- Source: `/Users/tonyholovka/workspace/zed/claude-code-acp/src/acp-agent.ts`
+- Source: `zed/claude-code-acp/src/acp-agent.ts` (relative to workspace root)
 
 ### Codex ACP Adapter
 - Published by Zed Industries

@@ -23,6 +23,7 @@ const AgentConfigSchema = z.object({
 const BridgeConfigSchema = z.object({
   workspaceRoot: z.string(),
   agents: z.record(z.string(), AgentConfigSchema),
+  /** Currently unused — reserved for future manual-approval workflow */
   permissions: z.object({ autoApprove: z.boolean() }),
   polling: z.object({ intervalMs: z.number().min(500).max(60000) }),
   logging: z.object({
@@ -31,6 +32,11 @@ const BridgeConfigSchema = z.object({
   }),
 })
 
+/**
+ * Model configuration for an agent.
+ * `keyEnv` is used at runtime to pass API keys.
+ * `flag`, `value`, `provider` are metadata used by config tooling and reserved for non-ACP agent types.
+ */
 export interface ModelConfig {
   flag: string
   value: string
@@ -52,6 +58,7 @@ export interface AgentConfig {
 export interface BridgeConfig {
   workspaceRoot: string
   agents: Record<string, AgentConfig>
+  /** Currently unused — reserved for future manual-approval workflow */
   permissions: { autoApprove: boolean }
   polling: { intervalMs: number }
   logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
@@ -107,7 +114,7 @@ export function getAvailableModels(agent: AgentConfig): string[] {
     return Object.keys(agent.models)
   }
   return Object.entries(agent.models)
-    .filter(([_, m]) => m.keyEnv && !!process.env[m.keyEnv])
+    .filter(([, m]) => m.keyEnv && !!process.env[m.keyEnv])
     .map(([name]) => name)
 }
 

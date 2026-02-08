@@ -86,14 +86,14 @@
 **Priority**: P2
 
 ### Tasks
-- [ ] 6.1 Remove unused imports (`result-writer.ts`)
-- [ ] 6.2 Remove or use unused `agentName` parameter (`agent-adapters.ts`)
-- [ ] 6.3 Remove or implement `permissions.autoApprove` (`config.ts`)
-- [ ] 6.4 Remove unused `ModelConfig` fields (`config.ts`)
-- [ ] 6.5 Centralize version string (new `version.ts`)
-- [ ] 6.6 Add MCP tool name convention comment (`mcp-server.ts`)
-- [ ] 6.7 Remove absolute paths from docs
-- [ ] 6.8 Enable `noUnusedLocals` in tsconfig
+- [x] 6.1 Remove unused imports (`result-writer.ts`)
+- [x] 6.2 Remove or use unused `agentName` parameter (`agent-adapters.ts`)
+- [x] 6.3 Remove or implement `permissions.autoApprove` (`config.ts`)
+- [x] 6.4 Remove unused `ModelConfig` fields (`config.ts`)
+- [x] 6.5 Centralize version string (new `version.ts`)
+- [x] 6.6 Add MCP tool name convention comment (`mcp-server.ts`)
+- [x] 6.7 Remove absolute paths from docs
+- [x] 6.8 Enable `noUnusedLocals` in tsconfig
 
 ---
 
@@ -157,11 +157,11 @@
 | 3 | Security Med/Low | 6 | 6 | **Complete** |
 | 4 | Typing & Validation | 4 | 4 | **Complete** |
 | 5 | Error Handling | 6 | 6 | **Complete** |
-| 6 | Cleanup | 8 | 0 | Pending |
+| 6 | Cleanup | 8 | 8 | **Complete** |
 | 7 | Production Resilience | 5 | 0 | Pending |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **23** | |
+| **Total** | | **52** | **31** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

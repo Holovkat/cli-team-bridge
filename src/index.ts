@@ -9,6 +9,7 @@ import { writeTaskResult, markTaskInProgress, type TaskResult } from './result-w
 import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { startMcpServer } from './mcp-server'
+import { VERSION } from './version'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -34,7 +35,7 @@ configureLogger(config.logging.level, config.logging.file)
 // Startup banner
 console.error(`
 ╔══════════════════════════════════════════╗
-║       CLI Team Bridge v0.1.0             ║
+║       CLI Team Bridge v${VERSION}             ║
 ║       ACP Multi-Agent Coordinator        ║
 ╚══════════════════════════════════════════╝
 `)

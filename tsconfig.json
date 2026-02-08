@@ -11,7 +11,9 @@
     "rootDir": "src",
     "types": ["bun-types"],
     "resolveJsonModule": true,
-    "declaration": true
+    "declaration": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

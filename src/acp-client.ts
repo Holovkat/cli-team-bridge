@@ -8,6 +8,7 @@ import {
   type Agent,
 } from '@agentclientprotocol/sdk'
 import { logger } from './logger'
+import { VERSION } from './version'
 
 export interface AcpSpawnConfig {
   command: string
@@ -245,8 +246,8 @@ export async function runAcpSession(
       withTimeout(
         connection.initialize({
           protocolVersion: 1,
-          clientCapabilities: {},
-          clientInfo: { name: 'cli-team-bridge', version: '0.1.0' },
+          clientCapabilities: { fs: { read: true, write: true } },
+          clientInfo: { name: 'cli-team-bridge', version: VERSION },
         } as any),
         INIT_TIMEOUT_MS,
         'ACP initialize',
@@ -317,7 +318,8 @@ export async function runAcpSession(
     if (sigkillTimer) clearTimeout(sigkillTimer)
     safeKill(proc)
 
-    const errorMsg = `ACP session error: ${err}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
+    const errStr = err instanceof Error ? err.message : JSON.stringify(err, null, 2)
+    const errorMsg = `ACP session error: ${errStr}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
     logger.error(errorMsg)
     return { output, error: errorMsg, timedOut, stopReason: null, toolCalls }
   }

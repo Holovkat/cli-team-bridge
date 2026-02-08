@@ -4,13 +4,14 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { join, resolve, sep } from 'path'
+import { resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { type BridgeConfig, isAgentAvailable, getAvailableModels } from './config'
 import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
+import { VERSION } from './version'
 
 interface ActiveTask {
   id: string
@@ -45,11 +46,13 @@ function pruneCompletedTasks() {
 
 export async function startMcpServer(config: BridgeConfig, workspaceRoot: string) {
   const server = new Server(
-    { name: 'cli-team-bridge', version: '0.1.0' },
+    { name: 'cli-team-bridge', version: VERSION },
     { capabilities: { tools: {} } },
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    // MCP tool names use snake_case per protocol convention
+    // Internal TypeScript code uses camelCase
     tools: [
       {
         name: 'list_agents',
