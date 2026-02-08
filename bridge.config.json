@@ -1,9 +1,9 @@
 {
   "agents": {
     "codex": {
-      "type": "codex",
-      "command": "codex",
-      "args": ["--acp"],
+      "type": "acp",
+      "command": "codex-acp",
+      "args": [],
       "cwd": "/app",
       "defaultModel": "gpt-5.2-codex",
       "models": {
@@ -15,9 +15,9 @@
       "strengths": ["code generation", "refactoring", "debugging"]
     },
     "claude-code": {
-      "type": "claude-code-acp",
-      "command": "npx",
-      "args": ["claude-code-acp"],
+      "type": "acp",
+      "command": "claude-code-acp",
+      "args": [],
       "cwd": "/app",
       "defaultModel": "opus",
       "models": {
@@ -28,21 +28,19 @@
       "strengths": ["architecture", "complex reasoning", "code review"]
     },
     "droid": {
-      "type": "factory-droid",
-      "command": "npx",
-      "args": ["droid-acp"],
+      "type": "acp",
+      "command": "droid-acp",
+      "args": [],
       "cwd": "/app",
-      "defaultModel": "deepseek-v3",
+      "defaultModel": "claude-opus-4-6",
       "models": {
-        "deepseek-v3": { "flag": "--model", "value": "deepseek-v3", "keyEnv": "DEEPSEEK_API_KEY", "provider": "z.ai" },
-        "deepseek-r1": { "flag": "--model", "value": "deepseek-r1", "keyEnv": "DEEPSEEK_API_KEY", "provider": "z.ai" },
-        "kimi-k2": { "flag": "--model", "value": "kimi-k2", "keyEnv": "KIMI_API_KEY", "provider": "kimi" },
-        "gpt-4o-droid": { "flag": "--model", "value": "gpt-4o", "keyEnv": "OPENAI_API_KEY", "provider": "openai" },
-        "claude-sonnet-droid": { "flag": "--model", "value": "claude-sonnet-4-5", "keyEnv": "ANTHROPIC_API_KEY", "provider": "anthropic" },
-        "ollama-qwen": { "flag": "--model", "value": "qwen2.5-coder:32b", "keyEnv": "OLLAMA_HOST", "provider": "ollama" },
-        "ollama-codellama": { "flag": "--model", "value": "codellama:34b", "keyEnv": "OLLAMA_HOST", "provider": "ollama" }
+        "claude-opus-4-6": { "flag": "--model", "value": "claude-opus-4-6", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
+        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
+        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro-preview", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
+        "glm-4.7": { "flag": "--model", "value": "glm-4.7", "keyEnv": "FACTORY_API_KEY", "provider": "factory" },
+        "kimi-k2.5": { "flag": "--model", "value": "kimi-k2.5", "keyEnv": "FACTORY_API_KEY", "provider": "factory" }
       },
-      "strengths": ["BYOK flexibility", "cost optimization", "local models via Ollama"]
+      "strengths": ["multi-model flexibility", "cost optimization", "custom model support"]
     }
   },
   "permissions": { "autoApprove": true },

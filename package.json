@@ -9,7 +9,9 @@
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.14.1"
+  },
   "devDependencies": {
     "bun-types": "^1.2.0",
     "typescript": "^5.7.0"

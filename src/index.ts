@@ -68,14 +68,14 @@ watcher.on('task-assigned', async (assignment: TaskAssignment) => {
     await markTaskInProgress(filePath, taskDir)
 
     // Build spawn config
-    const spawnConfig = buildSpawnConfig(task.owner, agentConfig, modelOverride)
+    const spawnConfig = buildSpawnConfig(task.owner, agentConfig)
     const model = modelOverride ?? agentConfig.defaultModel
 
     logger.info(`Starting ACP session for task ${task.id} with ${task.owner} (model: ${model})`)
     const startedAt = new Date().toISOString()
 
-    // Run ACP session
-    const acpResult = await runAcpSession(spawnConfig, task.description)
+    // Run ACP session with model selection
+    const acpResult = await runAcpSession(spawnConfig, task.description, model)
     const completedAt = new Date().toISOString()
 
     // Write result
