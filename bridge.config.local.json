@@ -1,0 +1,41 @@
+{
+  "agents": {
+    "codex": {
+      "type": "acp",
+      "command": "codex-acp",
+      "args": [],
+      "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
+      "defaultModel": "gpt-5.2-codex",
+      "models": {
+        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "keyEnv": "CODEX_AUTH" }
+      },
+      "strengths": ["code generation", "refactoring", "debugging"]
+    },
+    "claude-code": {
+      "type": "acp",
+      "command": "claude-code-acp",
+      "args": [],
+      "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
+      "defaultModel": "sonnet",
+      "models": {
+        "sonnet": { "flag": "--model", "value": "sonnet", "keyEnv": "CLAUDE_AUTH" },
+        "haiku": { "flag": "--model", "value": "haiku", "keyEnv": "CLAUDE_AUTH" }
+      },
+      "strengths": ["architecture", "complex reasoning", "code review"]
+    },
+    "droid": {
+      "type": "acp",
+      "command": "droid-acp",
+      "args": [],
+      "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
+      "defaultModel": "claude-opus-4-6",
+      "models": {
+        "claude-opus-4-6": { "flag": "--model", "value": "claude-opus-4-6", "keyEnv": "FACTORY_AUTH" }
+      },
+      "strengths": ["multi-model flexibility", "cost optimization"]
+    }
+  },
+  "permissions": { "autoApprove": true },
+  "polling": { "intervalMs": 2000 },
+  "logging": { "level": "debug", "file": "./bridge.log" }
+}

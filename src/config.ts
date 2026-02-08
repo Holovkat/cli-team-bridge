@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process'
 import { logger } from './logger'
 
 export interface ModelConfig {
@@ -57,11 +58,24 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
 }
 
 export function getAvailableModels(agent: AgentConfig): string[] {
+  // For ACP adapters, models are available if the adapter binary exists
+  // (adapters use stored auth, not necessarily env vars)
+  if (agent.type === 'acp') {
+    return Object.keys(agent.models)
+  }
   return Object.entries(agent.models)
     .filter(([_, m]) => !!process.env[m.keyEnv])
     .map(([name]) => name)
 }
 
 export function isAgentAvailable(agent: AgentConfig): boolean {
+  if (agent.type === 'acp') {
+    try {
+      execFileSync('which', [agent.command], { stdio: 'pipe' })
+      return true
+    } catch {
+      return false
+    }
+  }
   return getAvailableModels(agent).length > 0
 }

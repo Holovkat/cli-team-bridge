@@ -176,6 +176,7 @@ export async function runAcpSession(
     logger.info('Creating ACP session...')
     const session = await connection.newSession({
       cwd: config.cwd,
+      mcpServers: [],
     } as any)
 
     const sessionId = (session as any).sessionId
