@@ -13,9 +13,9 @@
 **Priority**: P0 — Must fix before any deployment
 
 ### Tasks
-- [ ] 1.1 Fix path traversal in MCP `assign_task` (`mcp-server.ts`)
-- [ ] 1.2 Replace blanket auto-approve with permission controls (`acp-client.ts`)
-- [ ] 1.3 Stop leaking full `process.env` to child processes (`acp-client.ts`)
+- [x] 1.1 Fix path traversal in MCP `assign_task` (`mcp-server.ts`)
+- [x] 1.2 Replace blanket auto-approve with permission controls (`acp-client.ts`)
+- [x] 1.3 Stop leaking full `process.env` to child processes (`acp-client.ts`)
 
 ---
 
@@ -152,7 +152,7 @@
 
 | Sprint | Shard | Tasks | Done | Status |
 |--------|-------|-------|------|--------|
-| 1 | Security Critical | 3 | 0 | Pending |
+| 1 | Security Critical | 3 | 3 | **Complete** |
 | 2 | Security High | 4 | 0 | Pending |
 | 3 | Security Med/Low | 6 | 0 | Pending |
 | 4 | Typing & Validation | 4 | 0 | Pending |
@@ -161,7 +161,7 @@
 | 7 | Production Resilience | 5 | 0 | Pending |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **0** | |
+| **Total** | | **52** | **3** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**
