@@ -1,5 +1,35 @@
 import { execFileSync } from 'child_process'
+import { z } from 'zod'
 import { logger } from './logger'
+
+const ModelConfigSchema = z.object({
+  flag: z.string(),
+  value: z.string(),
+  keyEnv: z.string().optional(),
+  provider: z.string().optional(),
+})
+
+const AgentConfigSchema = z.object({
+  type: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  cwd: z.string(),
+  defaultModel: z.string(),
+  models: z.record(z.string(), ModelConfigSchema),
+  strengths: z.array(z.string()),
+  env: z.record(z.string(), z.string()).optional(),
+})
+
+const BridgeConfigSchema = z.object({
+  workspaceRoot: z.string(),
+  agents: z.record(z.string(), AgentConfigSchema),
+  permissions: z.object({ autoApprove: z.boolean() }),
+  polling: z.object({ intervalMs: z.number().min(500).max(60000) }),
+  logging: z.object({
+    level: z.enum(['debug', 'info', 'warn', 'error']),
+    file: z.string().optional(),
+  }),
+})
 
 export interface ModelConfig {
   flag: string
@@ -24,7 +54,7 @@ export interface BridgeConfig {
   agents: Record<string, AgentConfig>
   permissions: { autoApprove: boolean }
   polling: { intervalMs: number }
-  logging: { level: string; file?: string }
+  logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
 }
 
 export async function loadConfig(path: string): Promise<BridgeConfig> {
@@ -33,7 +63,8 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     throw new Error(`Config file not found: ${path}`)
   }
 
-  const config: BridgeConfig = await file.json()
+  const raw = await file.json()
+  const config = BridgeConfigSchema.parse(raw) as BridgeConfig
 
   if (!config.agents || Object.keys(config.agents).length === 0) {
     throw new Error('Config must define at least one agent')
@@ -41,6 +72,7 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
 
   const ALLOWED_COMMANDS = new Set([
     'codex-acp', 'claude-code-acp', 'droid-acp',
+    'gemini', 'qwen',
   ])
 
   // Validate each agent and check env vars

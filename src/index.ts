@@ -17,7 +17,7 @@ const { values } = parseArgs({
     config: { type: 'string', default: './bridge.config.json' },
     mode: { type: 'string', default: 'both' }, // watcher | mcp | both
   },
-  strict: true,
+  strict: false,
 })
 
 const mode = values.mode as 'watcher' | 'mcp' | 'both'
@@ -28,8 +28,8 @@ if (mode !== 'mcp' && !values.team) {
   process.exit(1)
 }
 
-const config = await loadConfig(values.config!)
-configureLogger(config.logging.level as any, config.logging.file)
+const config = await loadConfig(values.config as string)
+configureLogger(config.logging.level, config.logging.file)
 
 // Startup banner
 console.error(`
@@ -54,7 +54,7 @@ if (mode === 'watcher' || mode === 'both') {
   const CLAUDE_DIR = process.env['HOME']
     ? join(process.env['HOME'], '.claude')
     : '/root/.claude'
-  const taskDir = join(CLAUDE_DIR, 'tasks', values.team!)
+  const taskDir = join(CLAUDE_DIR, 'tasks', values.team as string)
 
   if (!existsSync(taskDir)) {
     mkdirSync(taskDir, { recursive: true })
@@ -131,7 +131,7 @@ if (mode === 'watcher' || mode === 'both') {
   process.on('SIGHUP', async () => {
     logger.info('SIGHUP received — reloading config and manifest')
     try {
-      const newConfig = await loadConfig(values.config!)
+      const newConfig = await loadConfig(values.config as string)
       // Deep replace — Object.assign is shallow, leaves stale nested objects
       for (const key of Object.keys(config) as (keyof BridgeConfig)[]) {
         delete (config as any)[key]

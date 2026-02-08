@@ -61,7 +61,9 @@ export class TaskWatcher extends EventEmitter {
         const filePath = join(this.taskDir, file)
         try {
           const raw = readFileSync(filePath, 'utf-8')
-          const task: TaskData = JSON.parse(raw)
+          const parsed: unknown = JSON.parse(raw)
+          if (!parsed || typeof parsed !== 'object') continue
+          const task = parsed as TaskData
 
           if (!task.id || !task.owner || !task.status) continue
           if (task.status !== 'pending') continue
