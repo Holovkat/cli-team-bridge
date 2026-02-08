@@ -1,8 +1,10 @@
 # cli-team-bridge
 
-ACP multi-agent coordinator that lets Claude Code (or any MCP client) delegate tasks to external coding agents — Codex, Claude Code, Gemini, Qwen, Droid (Factory), and Ollama — over the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol).
+An MCP-to-ACP bridge that lets Claude Code (or any MCP client) delegate tasks to external coding agents — Codex, Claude Code, Gemini, Qwen, Droid (Factory), and Ollama — over the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol).
 
-Inspired by [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) — the built-in experimental feature for coordinating multiple Claude Code sessions. This project extends that concept across vendor boundaries, letting you orchestrate agents from OpenAI, Anthropic, Google, Alibaba, and local models (Ollama) through a single MCP bridge.
+Inspired by [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) — the built-in experimental feature for coordinating multiple Claude Code sessions. This project extends that concept across vendor boundaries, letting you orchestrate agents from OpenAI, Anthropic, Google, Alibaba, and local models (Ollama) through a single MCP-to-ACP bridge.
+
+The bridge translates [MCP](https://modelcontextprotocol.io/) tool calls (JSON-RPC over stdio) into [ACP](https://github.com/zed-industries/agent-client-protocol) sessions (NDJSON over stdio), so your MCP client doesn't need to know anything about ACP — it just calls `assign_task` and gets results back.
 
 ## What it does
 
@@ -26,6 +28,22 @@ All agents can run concurrently — each gets its own isolated child process.
 | **droid** | `droid-acp` | `custom:kimi-for-coding-[Kimi]-7` | OAuth (`droid login`) |
 
 Each agent supports multiple models — see [Configuration](#configuration) for the full list. Gemini and Qwen have built-in ACP support (no separate adapter binary needed).
+
+### Authentication
+
+Each agent CLI uses its own OAuth flow. You authenticate once per agent on your machine, and the bridge uses those stored credentials — no API keys are passed through the bridge itself.
+
+```bash
+codex login          # Authenticates with OpenAI — uses your OpenAI subscription
+claude login         # Authenticates with Anthropic — uses your Anthropic subscription
+gemini login         # Authenticates with Google — uses your Google AI subscription
+qwen login           # Authenticates with Alibaba Cloud — uses your Qwen subscription
+droid login          # Authenticates with Factory — uses your Factory subscription
+```
+
+Each login stores OAuth tokens locally (e.g. `~/.codex/`, `~/.claude/`, `~/.factory/`). The bridge spawns agent processes that read these tokens directly — it never handles credentials itself. You use your own subscriptions and quotas for each provider.
+
+Droid/Factory also supports custom model routing through API keys configured in `~/.factory/settings.json` (e.g. Kimi, Ollama, LM Studio). These are managed by Factory, not the bridge.
 
 ## Prerequisites
 
@@ -248,13 +266,13 @@ volumes:
 
 ### Environment variables
 
-Set in `.env` or pass directly:
+All agents use OAuth by default (see [Authentication](#authentication)). API keys are only needed if you prefer key-based auth over OAuth:
 
 ```
-OPENAI_API_KEY=...      # Optional: for codex API key auth
-ANTHROPIC_API_KEY=...   # Optional: for claude-code API key auth
-GOOGLE_API_KEY=...      # Optional: for gemini API key auth
-OLLAMA_HOST=...         # Optional: for local model proxying
+OPENAI_API_KEY=...      # Optional: alternative to `codex login`
+ANTHROPIC_API_KEY=...   # Optional: alternative to `claude login`
+GOOGLE_API_KEY=...      # Optional: alternative to `gemini login`
+OLLAMA_HOST=...         # Optional: Ollama server URL (default: http://localhost:11434)
 ```
 
 ## Security
@@ -274,16 +292,18 @@ The bridge includes several security measures:
 ```
 Claude Code (MCP client)
     |
-    | JSON-RPC over stdio
+    | MCP (JSON-RPC over stdio)
     v
-cli-team-bridge (MCP server)
+cli-team-bridge (MCP-to-ACP bridge)
     |
-    |--- spawn ---> codex-acp ---------> codex CLI ----> OpenAI
-    |--- spawn ---> claude-code-acp --> claude CLI ----> Anthropic
-    |--- spawn ---> gemini --experimental-acp ---------> Google AI
-    |--- spawn ---> qwen --acp -----------------------> DashScope
-    |--- spawn ---> droid-acp ---------> droid CLI ----> Factory.ai
-    |--- spawn ---> droid-acp ---------> droid CLI ----> Ollama (local)
+    | ACP (NDJSON over stdio)
+    |
+    |--- spawn ---> codex-acp ---------> codex CLI ----> OpenAI     (OAuth)
+    |--- spawn ---> claude-code-acp --> claude CLI ----> Anthropic   (OAuth)
+    |--- spawn ---> gemini --experimental-acp ---------> Google AI   (OAuth)
+    |--- spawn ---> qwen --acp -----------------------> Alibaba     (OAuth)
+    |--- spawn ---> droid-acp ---------> droid CLI ----> Factory.ai  (OAuth)
+    |--- spawn ---> droid-acp ---------> droid CLI ----> Ollama      (local)
 ```
 
 Each `assign_task` call spawns a separate ACP adapter process. Multiple tasks run concurrently in isolated child processes.
