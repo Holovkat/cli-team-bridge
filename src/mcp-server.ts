@@ -137,6 +137,26 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           model?: string
         }
 
+        // Validate inputs
+        const MAX_PROMPT_LENGTH = 100 * 1024 // 100KB
+        const MAX_NAME_LENGTH = 256
+
+        if (!agent || typeof agent !== 'string' || agent.length > MAX_NAME_LENGTH) {
+          return { content: [{ type: 'text', text: 'Invalid agent name' }], isError: true }
+        }
+        if (!prompt || typeof prompt !== 'string' || prompt.length > MAX_PROMPT_LENGTH) {
+          return { content: [{ type: 'text', text: `Prompt too large (max ${MAX_PROMPT_LENGTH} bytes)` }], isError: true }
+        }
+        if (!project || typeof project !== 'string' || project.length > MAX_NAME_LENGTH) {
+          return { content: [{ type: 'text', text: 'Invalid project name' }], isError: true }
+        }
+        if (/[\x00-\x1f]/.test(project)) {
+          return { content: [{ type: 'text', text: 'Project name contains control characters' }], isError: true }
+        }
+        if (model && (typeof model !== 'string' || model.length > MAX_NAME_LENGTH)) {
+          return { content: [{ type: 'text', text: 'Invalid model name' }], isError: true }
+        }
+
         const agentConfig = config.agents[agent]
         if (!agentConfig) {
           return {
@@ -168,7 +188,17 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        const taskId = randomUUID().slice(0, 8)
+        // Enforce concurrent task limit
+        const MAX_CONCURRENT_RUNNING = 10
+        const runningCount = [...activeTasks.values()].filter(t => t.status === 'running').length
+        if (runningCount >= MAX_CONCURRENT_RUNNING) {
+          return {
+            content: [{ type: 'text', text: `Too many concurrent tasks (${runningCount}/${MAX_CONCURRENT_RUNNING}). Try again later.` }],
+            isError: true,
+          }
+        }
+
+        const taskId = randomUUID()
         const modelId = model ?? agentConfig.defaultModel
 
         const task: ActiveTask = {
@@ -223,6 +253,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_task_status': {
         const { task_id } = args as { task_id: string }
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
         const task = activeTasks.get(task_id)
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
@@ -245,6 +278,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_task_result': {
         const { task_id } = args as { task_id: string }
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
         const task = activeTasks.get(task_id)
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }

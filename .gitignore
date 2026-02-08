@@ -1,8 +1,7 @@
 node_modules/
 dist/
-.env
+bridge.config.local.json
 bridge.log
+mcp-test-stderr.log
 *.tmp
-*.lock
 .bridge-lock
-bun.lock

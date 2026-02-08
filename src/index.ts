@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { parseArgs } from 'util'
-import { loadConfig } from './config'
+import { loadConfig, type BridgeConfig } from './config'
 import { configureLogger, logger } from './logger'
 import { generateManifest } from './manifest'
 import { TaskWatcher, type TaskAssignment } from './task-watcher'
@@ -132,8 +132,13 @@ if (mode === 'watcher' || mode === 'both') {
     logger.info('SIGHUP received — reloading config and manifest')
     try {
       const newConfig = await loadConfig(values.config!)
+      // Deep replace — Object.assign is shallow, leaves stale nested objects
+      for (const key of Object.keys(config) as (keyof BridgeConfig)[]) {
+        delete (config as any)[key]
+      }
       Object.assign(config, newConfig)
       await generateManifest(config, taskDir)
+      logger.info('Config reloaded successfully')
     } catch (err) {
       logger.error(`Reload failed: ${err}`)
     }

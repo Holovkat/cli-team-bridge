@@ -40,12 +40,12 @@
 **Priority**: P1
 
 ### Tasks
-- [ ] 3.1 Fix stale lock detection in lock manager (`lock-manager.ts`)
-- [ ] 3.2 Add input validation to MCP tool handlers (`mcp-server.ts`)
-- [ ] 3.3 Add concurrent task limit (`mcp-server.ts`)
-- [ ] 3.4 Use full UUID for task IDs (`mcp-server.ts`)
-- [ ] 3.5 Add `.gitignore` for local config and logs
-- [ ] 3.6 Validate config on SIGHUP reload (`index.ts`)
+- [x] 3.1 Fix stale lock detection in lock manager (`lock-manager.ts`)
+- [x] 3.2 Add input validation to MCP tool handlers (`mcp-server.ts`)
+- [x] 3.3 Add concurrent task limit (`mcp-server.ts`)
+- [x] 3.4 Use full UUID for task IDs (`mcp-server.ts`)
+- [x] 3.5 Add `.gitignore` for local config and logs
+- [x] 3.6 Validate config on SIGHUP reload (`index.ts`)
 
 ---
 
@@ -154,14 +154,14 @@
 |--------|-------|-------|------|--------|
 | 1 | Security Critical | 3 | 3 | **Complete** |
 | 2 | Security High | 4 | 4 | **Complete** |
-| 3 | Security Med/Low | 6 | 0 | Pending |
+| 3 | Security Med/Low | 6 | 6 | **Complete** |
 | 4 | Typing & Validation | 4 | 0 | Pending |
 | 5 | Error Handling | 6 | 0 | Pending |
 | 6 | Cleanup | 8 | 0 | Pending |
 | 7 | Production Resilience | 5 | 0 | Pending |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **7** | |
+| **Total** | | **52** | **13** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**
