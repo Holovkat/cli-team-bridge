@@ -25,6 +25,30 @@
       },
       "strengths": ["architecture", "complex reasoning", "code review"]
     },
+    "gemini": {
+      "type": "acp",
+      "command": "gemini",
+      "args": ["--experimental-acp"],
+      "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
+      "defaultModel": "gemini-2.5-pro",
+      "models": {
+        "gemini-2.5-pro": { "flag": "--model", "value": "gemini-2.5-pro" },
+        "gemini-2.5-flash": { "flag": "--model", "value": "gemini-2.5-flash" }
+      },
+      "strengths": ["multimodal", "large context window", "code generation"]
+    },
+    "qwen": {
+      "type": "acp",
+      "command": "qwen",
+      "args": ["--acp"],
+      "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
+      "defaultModel": "qwen3-coder",
+      "models": {
+        "qwen3-coder": { "flag": "--model", "value": "qwen3-coder" },
+        "qwen3": { "flag": "--model", "value": "qwen3" }
+      },
+      "strengths": ["multilingual", "code generation", "reasoning"]
+    },
     "droid": {
       "type": "acp",
       "command": "droid-acp",

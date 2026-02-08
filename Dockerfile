@@ -12,6 +12,10 @@ RUN bun install -g @anthropic-ai/claude-code@latest
 RUN bun install -g @openai/codex@latest
 RUN bun install -g @factory/cli@latest
 
+# Install CLIs with built-in ACP support (no separate adapter needed)
+RUN bun install -g @google/gemini-cli@latest
+RUN bun install -g qwen-code@latest
+
 # Create non-root user for security
 RUN groupadd -r bridge && useradd -r -g bridge -d /home/bridge -s /bin/bash bridge
 RUN mkdir -p /home/bridge/.codex /home/bridge/.factory /home/bridge/.claude

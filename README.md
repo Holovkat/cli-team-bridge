@@ -15,13 +15,15 @@ All three agents can run concurrently — each gets its own child process.
 
 ## Supported agents
 
-| Agent | Adapter | Default Model | Auth |
+| Agent | Command | Default Model | Auth |
 |-------|---------|---------------|------|
 | **codex** | `codex-acp` | `gpt-5.3-codex` | OAuth (`codex login`) |
 | **claude-code** | `claude-code-acp` | `opus` | OAuth (`claude login`) |
+| **gemini** | `gemini --experimental-acp` | `gemini-2.5-pro` | OAuth (`gemini login`) |
+| **qwen** | `qwen --acp` | `qwen3-coder` | API key (`DASHSCOPE_API_KEY`) |
 | **droid** | `droid-acp` | `custom:kimi-for-coding-[Kimi]-7` | OAuth (`droid login`) |
 
-Each agent supports multiple models — see [Configuration](#configuration) for the full list.
+Each agent supports multiple models — see [Configuration](#configuration) for the full list. Gemini and Qwen have built-in ACP support (no separate adapter binary needed).
 
 ## Prerequisites
 
@@ -38,7 +40,12 @@ Each agent supports multiple models — see [Configuration](#configuration) for 
   bun install -g @anthropic-ai/claude-code@latest
   bun install -g @factory/cli@latest
   ```
-- Each agent authenticated via their respective OAuth flow (`codex login`, `claude login`, `droid login`)
+- CLIs with built-in ACP (no adapter needed):
+  ```bash
+  npm install -g @google/gemini-cli@latest
+  npm install -g qwen-code@latest
+  ```
+- Each agent authenticated via their respective flow (`codex login`, `claude login`, `gemini login`, `droid login`, or `DASHSCOPE_API_KEY` for Qwen)
 
 ## Installation
 
@@ -238,6 +245,8 @@ Set in `.env` or pass directly:
 ```
 OPENAI_API_KEY=...      # Optional: for codex API key auth
 ANTHROPIC_API_KEY=...   # Optional: for claude-code API key auth
+GOOGLE_API_KEY=...      # Optional: for gemini API key auth
+DASHSCOPE_API_KEY=...   # Required for qwen
 OLLAMA_HOST=...         # Optional: for local model proxying
 ```
 
@@ -262,10 +271,12 @@ Claude Code (MCP client)
     v
 cli-team-bridge (MCP server)
     |
-    |--- spawn ---> codex-acp ---> codex CLI ---> OpenAI
-    |--- spawn ---> claude-code-acp ---> claude CLI ---> Anthropic
-    |--- spawn ---> droid-acp ---> droid CLI ---> Factory.ai
-    |--- spawn ---> droid-acp ---> droid CLI ---> Ollama (local)
+    |--- spawn ---> codex-acp ---------> codex CLI ----> OpenAI
+    |--- spawn ---> claude-code-acp --> claude CLI ----> Anthropic
+    |--- spawn ---> gemini --experimental-acp ---------> Google AI
+    |--- spawn ---> qwen --acp -----------------------> DashScope
+    |--- spawn ---> droid-acp ---------> droid CLI ----> Factory.ai
+    |--- spawn ---> droid-acp ---------> droid CLI ----> Ollama (local)
 ```
 
 Each `assign_task` call spawns a separate ACP adapter process. Multiple tasks run concurrently in isolated child processes.
