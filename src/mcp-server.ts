@@ -4,7 +4,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { type BridgeConfig, isAgentAvailable, getAvailableModels } from './config'
@@ -152,8 +152,15 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        // Resolve and validate project path
-        const projectPath = join(workspaceRoot, project)
+        // Path traversal protection — resolve and verify containment
+        const projectPath = resolve(workspaceRoot, project)
+        const resolvedRoot = resolve(workspaceRoot)
+        if (!projectPath.startsWith(resolvedRoot + sep) && projectPath !== resolvedRoot) {
+          return {
+            content: [{ type: 'text', text: `Project path escapes workspace root: ${project}` }],
+            isError: true,
+          }
+        }
         if (!existsSync(projectPath)) {
           return {
             content: [{ type: 'text', text: `Project path does not exist: ${projectPath}` }],

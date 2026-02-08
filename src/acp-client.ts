@@ -108,7 +108,17 @@ export async function runAcpSession(
   try {
     proc = spawn(config.command, config.args, {
       cwd: config.cwd,
-      env: { ...process.env, ...config.env },
+      env: {
+        // Allowlist — only pass essential system vars, not all secrets
+        PATH: process.env['PATH'] ?? '',
+        HOME: process.env['HOME'] ?? '',
+        SHELL: process.env['SHELL'] ?? '',
+        TERM: process.env['TERM'] ?? '',
+        LANG: process.env['LANG'] ?? '',
+        NODE_ENV: process.env['NODE_ENV'] ?? '',
+        // Agent-specific env vars (API keys only for this agent)
+        ...config.env,
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
   } catch (err) {
@@ -152,17 +162,32 @@ export async function runAcpSession(
     // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
-        // Auto-approve all permission requests (bridge runs in trusted mode)
+        // Permission controls: deny destructive operations, prefer allow_once
         requestPermission: async (params) => {
-          const allowOption = params.options?.find(
-            (o: any) => o.kind === 'allow_always' || o.kind === 'allow_once',
-          )
-          logger.debug(`Permission requested: ${params.toolCall?.title ?? 'unknown'} → auto-approving`)
+          const toolTitle = params.toolCall?.title ?? 'unknown'
+
+          // Deny destructive operations
+          const DENIED_PATTERNS = [
+            /rm\s+-rf/i, /git\s+push\s+--force/i, /git\s+reset\s+--hard/i,
+            /DROP\s+TABLE/i, /DELETE\s+FROM/i, /shutdown/i,
+          ]
+          const description = JSON.stringify(params)
+          if (DENIED_PATTERNS.some(p => p.test(description))) {
+            logger.warn(`Permission DENIED (destructive): ${toolTitle}`)
+            const denyOption = params.options?.find((o: any) => o.kind === 'deny')
+            return {
+              outcome: { outcome: 'selected', optionId: denyOption?.optionId ?? 'deny' },
+            } as any
+          }
+
+          // Prefer allow_once over allow_always to limit blast radius
+          const allowOnce = params.options?.find((o: any) => o.kind === 'allow_once')
+          const allowAlways = params.options?.find((o: any) => o.kind === 'allow_always')
+          const selected = allowOnce ?? allowAlways
+
+          logger.info(`Permission GRANTED (${selected?.kind ?? 'fallback'}): ${toolTitle}`)
           return {
-            outcome: {
-              outcome: 'selected',
-              optionId: allowOption?.optionId ?? 'allow',
-            },
+            outcome: { outcome: 'selected', optionId: selected?.optionId ?? 'allow' },
           } as any
         },
 
