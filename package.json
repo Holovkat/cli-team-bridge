@@ -1,0 +1,17 @@
+{
+  "name": "cli-team-bridge",
+  "version": "0.1.0",
+  "description": "ACP multi-agent coordinator — bridges Claude Code teams to external coding agents",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "bun-types": "^1.2.0",
+    "typescript": "^5.7.0"
+  }
+}

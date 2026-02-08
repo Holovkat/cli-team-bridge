@@ -1,0 +1,51 @@
+{
+  "agents": {
+    "codex": {
+      "type": "codex",
+      "command": "codex",
+      "args": ["--acp"],
+      "cwd": "/app",
+      "defaultModel": "gpt-5.2-codex",
+      "models": {
+        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "keyEnv": "OPENAI_API_KEY" },
+        "gpt-4o": { "flag": "--model", "value": "gpt-4o", "keyEnv": "OPENAI_API_KEY" },
+        "o3": { "flag": "--model", "value": "o3", "keyEnv": "OPENAI_API_KEY" },
+        "o4-mini": { "flag": "--model", "value": "o4-mini", "keyEnv": "OPENAI_API_KEY" }
+      },
+      "strengths": ["code generation", "refactoring", "debugging"]
+    },
+    "claude-code": {
+      "type": "claude-code-acp",
+      "command": "npx",
+      "args": ["claude-code-acp"],
+      "cwd": "/app",
+      "defaultModel": "opus",
+      "models": {
+        "opus": { "flag": "--model", "value": "opus", "keyEnv": "ANTHROPIC_API_KEY" },
+        "sonnet": { "flag": "--model", "value": "sonnet", "keyEnv": "ANTHROPIC_API_KEY" },
+        "haiku": { "flag": "--model", "value": "haiku", "keyEnv": "ANTHROPIC_API_KEY" }
+      },
+      "strengths": ["architecture", "complex reasoning", "code review"]
+    },
+    "droid": {
+      "type": "factory-droid",
+      "command": "npx",
+      "args": ["droid-acp"],
+      "cwd": "/app",
+      "defaultModel": "deepseek-v3",
+      "models": {
+        "deepseek-v3": { "flag": "--model", "value": "deepseek-v3", "keyEnv": "DEEPSEEK_API_KEY", "provider": "z.ai" },
+        "deepseek-r1": { "flag": "--model", "value": "deepseek-r1", "keyEnv": "DEEPSEEK_API_KEY", "provider": "z.ai" },
+        "kimi-k2": { "flag": "--model", "value": "kimi-k2", "keyEnv": "KIMI_API_KEY", "provider": "kimi" },
+        "gpt-4o-droid": { "flag": "--model", "value": "gpt-4o", "keyEnv": "OPENAI_API_KEY", "provider": "openai" },
+        "claude-sonnet-droid": { "flag": "--model", "value": "claude-sonnet-4-5", "keyEnv": "ANTHROPIC_API_KEY", "provider": "anthropic" },
+        "ollama-qwen": { "flag": "--model", "value": "qwen2.5-coder:32b", "keyEnv": "OLLAMA_HOST", "provider": "ollama" },
+        "ollama-codellama": { "flag": "--model", "value": "codellama:34b", "keyEnv": "OLLAMA_HOST", "provider": "ollama" }
+      },
+      "strengths": ["BYOK flexibility", "cost optimization", "local models via Ollama"]
+    }
+  },
+  "permissions": { "autoApprove": true },
+  "polling": { "intervalMs": 2000 },
+  "logging": { "level": "info", "file": "./bridge.log" }
+}

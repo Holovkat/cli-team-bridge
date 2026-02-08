@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+bridge.log
+*.tmp
+*.lock
+.bridge-lock
+bun.lock
