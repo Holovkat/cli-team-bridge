@@ -104,11 +104,11 @@
 **Priority**: P0-P1
 
 ### Tasks
-- [ ] 7.1 Add retry logic with exponential backoff (new `retry.ts`)
-- [ ] 7.2 Add MCP authentication (`mcp-server.ts`)
-- [ ] 7.3 Add task persistence with SQLite (new `persistence.ts`)
-- [ ] 7.4 Add task cancellation MCP tool (`mcp-server.ts`, `acp-client.ts`)
-- [ ] 7.5 Add stuck task detection (`task-watcher.ts`)
+- [x] 7.1 Add retry logic with exponential backoff (new `retry.ts`)
+- [x] 7.2 Add MCP authentication (`mcp-server.ts`)
+- [x] 7.3 Add task persistence with SQLite (new `persistence.ts`)
+- [x] 7.4 Add task cancellation MCP tool (`mcp-server.ts`, `acp-client.ts`)
+- [x] 7.5 Add stuck task detection (`task-watcher.ts`)
 
 ---
 
@@ -158,10 +158,10 @@
 | 4 | Typing & Validation | 4 | 4 | **Complete** |
 | 5 | Error Handling | 6 | 6 | **Complete** |
 | 6 | Cleanup | 8 | 8 | **Complete** |
-| 7 | Production Resilience | 5 | 0 | Pending |
+| 7 | Production Resilience | 5 | 5 | **Complete** |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **31** | |
+| **Total** | | **52** | **36** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

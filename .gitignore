@@ -5,3 +5,4 @@ bridge.log
 mcp-test-stderr.log
 *.tmp
 .bridge-lock
+.bridge-tasks.db

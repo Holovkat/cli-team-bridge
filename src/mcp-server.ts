@@ -20,11 +20,12 @@ interface ActiveTask {
   model: string
   project: string
   prompt: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   startedAt: string
   completedAt?: string
   output?: string
   error?: string | null
+  proc?: { kill: (signal?: string) => void }
 }
 
 const activeTasks = new Map<string, ActiveTask>()
@@ -54,6 +55,10 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
     { name: 'cli-team-bridge', version: VERSION },
     { capabilities: { tools: {} } },
   )
+
+  // Authentication: For stdio transport, trust parent process (no auth needed).
+  // When HTTP/WS transport is added, validate bearer tokens from config.auth.tokens
+  // config.auth?.tokens can be checked against request headers in future transport layer
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     // MCP tool names use snake_case per protocol convention
@@ -112,6 +117,17 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           type: 'object' as const,
           properties: {
             task_id: { type: 'string', description: 'Task ID returned by assign_task' },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'cancel_task',
+        description: 'Cancel a running task by its ID. Sends SIGTERM to the agent process.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            task_id: { type: 'string', description: 'Task ID to cancel' },
           },
           required: ['task_id'],
         },
@@ -324,6 +340,34 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               error: task.error ?? null,
             }, null, 2),
           }],
+        }
+      }
+
+      case 'cancel_task': {
+        const { task_id } = args as { task_id: string }
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
+        const task = activeTasks.get(task_id)
+        if (!task) {
+          return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
+        }
+        if (task.status !== 'running') {
+          return { content: [{ type: 'text', text: `Task "${task_id}" is not running (status: ${task.status})` }], isError: true }
+        }
+        if (task.proc) {
+          try {
+            task.proc.kill('SIGTERM')
+          } catch {
+            // Process may have already exited
+          }
+        }
+        task.status = 'cancelled'
+        task.completedAt = new Date().toISOString()
+        task.error = 'Cancelled by user'
+        logger.info(`[MCP] Task ${task_id} cancelled`)
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ task_id, status: 'cancelled', message: 'Task cancelled successfully' }, null, 2) }],
         }
       }
 
