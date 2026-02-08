@@ -8,6 +8,7 @@ import {
   type Agent,
 } from '@agentclientprotocol/sdk'
 import { logger } from './logger'
+import { VERSION } from './version'
 
 export interface AcpSpawnConfig {
   command: string
@@ -33,6 +34,7 @@ export interface ToolCallInfo {
 const TASK_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 const INIT_TIMEOUT_MS = 30 * 1000 // 30 seconds for initialize/newSession
 const MAX_STDERR_BYTES = 64 * 1024 // 64KB cap on stderr buffer
+const MAX_OUTPUT_BYTES = 1024 * 1024 // 1MB cap on agent output buffer
 
 /** Safely kill a process — no-op if already dead */
 function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
@@ -71,13 +73,24 @@ function nodeToWebWritable(nodeStream: Writable): WritableStream<Uint8Array> {
 }
 
 function nodeToWebReadable(nodeStream: Readable): ReadableStream<Uint8Array> {
+  let onData: ((chunk: Buffer) => void) | null = null
+  let onEnd: (() => void) | null = null
+  let onError: ((err: Error) => void) | null = null
+
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      nodeStream.on('data', (chunk: Buffer) => {
-        controller.enqueue(new Uint8Array(chunk))
-      })
-      nodeStream.on('end', () => controller.close())
-      nodeStream.on('error', (err) => controller.error(err))
+      onData = (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk))
+      onEnd = () => controller.close()
+      onError = (err) => controller.error(err)
+      nodeStream.on('data', onData)
+      nodeStream.on('end', onEnd)
+      nodeStream.on('error', onError)
+    },
+    cancel() {
+      if (onData) nodeStream.off('data', onData)
+      if (onEnd) nodeStream.off('end', onEnd)
+      if (onError) nodeStream.off('error', onError)
+      nodeStream.destroy()
     },
   })
 }
@@ -108,7 +121,17 @@ export async function runAcpSession(
   try {
     proc = spawn(config.command, config.args, {
       cwd: config.cwd,
-      env: { ...process.env, ...config.env },
+      env: {
+        // Allowlist — only pass essential system vars, not all secrets
+        PATH: process.env['PATH'] ?? '',
+        HOME: process.env['HOME'] ?? '',
+        SHELL: process.env['SHELL'] ?? '',
+        TERM: process.env['TERM'] ?? '',
+        LANG: process.env['LANG'] ?? '',
+        NODE_ENV: process.env['NODE_ENV'] ?? '',
+        // Agent-specific env vars (API keys only for this agent)
+        ...config.env,
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
   } catch (err) {
@@ -152,17 +175,32 @@ export async function runAcpSession(
     // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
-        // Auto-approve all permission requests (bridge runs in trusted mode)
+        // Permission controls: deny destructive operations, prefer allow_once
         requestPermission: async (params) => {
-          const allowOption = params.options?.find(
-            (o: any) => o.kind === 'allow_always' || o.kind === 'allow_once',
-          )
-          logger.debug(`Permission requested: ${params.toolCall?.title ?? 'unknown'} → auto-approving`)
+          const toolTitle = params.toolCall?.title ?? 'unknown'
+
+          // Deny destructive operations
+          const DENIED_PATTERNS = [
+            /rm\s+-rf/i, /git\s+push\s+--force/i, /git\s+reset\s+--hard/i,
+            /DROP\s+TABLE/i, /DELETE\s+FROM/i, /shutdown/i,
+          ]
+          const description = JSON.stringify(params)
+          if (DENIED_PATTERNS.some(p => p.test(description))) {
+            logger.warn(`Permission DENIED (destructive): ${toolTitle}`)
+            const denyOption = params.options?.find((o: any) => o.kind === 'deny')
+            return {
+              outcome: { outcome: 'selected', optionId: denyOption?.optionId ?? 'deny' },
+            } as any
+          }
+
+          // Prefer allow_once over allow_always to limit blast radius
+          const allowOnce = params.options?.find((o: any) => o.kind === 'allow_once')
+          const allowAlways = params.options?.find((o: any) => o.kind === 'allow_always')
+          const selected = allowOnce ?? allowAlways
+
+          logger.info(`Permission GRANTED (${selected?.kind ?? 'fallback'}): ${toolTitle}`)
           return {
-            outcome: {
-              outcome: 'selected',
-              optionId: allowOption?.optionId ?? 'allow',
-            },
+            outcome: { outcome: 'selected', optionId: selected?.optionId ?? 'allow' },
           } as any
         },
 
@@ -172,7 +210,9 @@ export async function runAcpSession(
           switch (update.sessionUpdate) {
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
-                output += update.content.text
+                if (output.length < MAX_OUTPUT_BYTES) {
+                  output += update.content.text.slice(0, MAX_OUTPUT_BYTES - output.length)
+                }
               }
               break
             case 'agent_thought_chunk':
@@ -206,8 +246,8 @@ export async function runAcpSession(
       withTimeout(
         connection.initialize({
           protocolVersion: 1,
-          clientCapabilities: {},
-          clientInfo: { name: 'cli-team-bridge', version: '0.1.0' },
+          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+          clientInfo: { name: 'cli-team-bridge', version: VERSION },
         } as any),
         INIT_TIMEOUT_MS,
         'ACP initialize',
@@ -278,7 +318,8 @@ export async function runAcpSession(
     if (sigkillTimer) clearTimeout(sigkillTimer)
     safeKill(proc)
 
-    const errorMsg = `ACP session error: ${err}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
+    const errStr = err instanceof Error ? err.message : JSON.stringify(err, null, 2)
+    const errorMsg = `ACP session error: ${errStr}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
     logger.error(errorMsg)
     return { output, error: errorMsg, timedOut, stopReason: null, toolCalls }
   }

@@ -1,5 +1,4 @@
 import { readFileSync, renameSync } from 'fs'
-import { join, dirname } from 'path'
 import { LockManager } from './lock-manager'
 import { logger } from './logger'
 
@@ -19,7 +18,7 @@ export async function writeTaskResult(
   filePath: string,
   result: TaskResult,
   taskDir: string,
-): Promise<void> {
+): Promise<boolean> {
   const lock = new LockManager(taskDir)
 
   try {
@@ -29,7 +28,11 @@ export async function writeTaskResult(
     }
 
     const raw = readFileSync(filePath, 'utf-8')
-    const task = JSON.parse(raw)
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('status' in parsed)) {
+      throw new Error(`Invalid task file format: ${filePath}`)
+    }
+    const task = parsed as { id: string; status: string; result?: unknown; [key: string]: unknown }
 
     // Truncate output
     const truncatedOutput = result.output.length > MAX_OUTPUT_LENGTH
@@ -49,14 +52,16 @@ export async function writeTaskResult(
     renameSync(tmpPath, filePath)
 
     logger.info(`Result written for task ${task.id}: ${result.status}`)
+    return true
   } catch (err) {
     logger.error(`Failed to write result for ${filePath}: ${err}`)
+    return false
   } finally {
     lock.release()
   }
 }
 
-export async function markTaskInProgress(filePath: string, taskDir: string): Promise<void> {
+export async function markTaskInProgress(filePath: string, taskDir: string): Promise<boolean> {
   const lock = new LockManager(taskDir)
 
   try {
@@ -66,14 +71,20 @@ export async function markTaskInProgress(filePath: string, taskDir: string): Pro
     }
 
     const raw = readFileSync(filePath, 'utf-8')
-    const task = JSON.parse(raw)
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('status' in parsed)) {
+      throw new Error(`Invalid task file format: ${filePath}`)
+    }
+    const task = parsed as { id: string; status: string; [key: string]: unknown }
     task.status = 'in_progress'
 
     const tmpPath = filePath + '.tmp'
     await Bun.write(tmpPath, JSON.stringify(task, null, 2))
     renameSync(tmpPath, filePath)
+    return true
   } catch (err) {
     logger.error(`Failed to mark in_progress: ${err}`)
+    return false
   } finally {
     lock.release()
   }

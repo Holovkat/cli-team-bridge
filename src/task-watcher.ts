@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import { readdirSync, readFileSync } from 'fs'
+import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { type BridgeConfig } from './config'
 import { logger } from './logger'
@@ -53,6 +53,17 @@ export class TaskWatcher extends EventEmitter {
     this.processing.delete(taskId)
   }
 
+  updateAgents(config: BridgeConfig): void {
+    this.agentNames = new Set(Object.keys(config.agents))
+    this.intervalMs = config.polling.intervalMs
+    logger.info(`Watcher updated — agents: ${[...this.agentNames].join(', ')}, interval: ${this.intervalMs}ms`)
+    // Restart timer with new interval
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = setInterval(() => this.poll(), this.intervalMs)
+    }
+  }
+
   private poll() {
     try {
       const files = readdirSync(this.taskDir).filter(f => f.endsWith('.json') && f !== 'bridge-manifest.json')
@@ -61,10 +72,30 @@ export class TaskWatcher extends EventEmitter {
         const filePath = join(this.taskDir, file)
         try {
           const raw = readFileSync(filePath, 'utf-8')
-          const task: TaskData = JSON.parse(raw)
+          const parsed: unknown = JSON.parse(raw)
+          if (!parsed || typeof parsed !== 'object') continue
+          const task = parsed as TaskData
 
           if (!task.id || !task.owner || !task.status) continue
-          if (task.status !== 'pending') continue
+          if (task.status !== 'pending') {
+            if (task.status === 'in_progress') {
+              const leaseExpiresAt = task.metadata?.leaseExpiresAt
+              if (leaseExpiresAt && typeof leaseExpiresAt === 'string') {
+                const expired = Date.now() > new Date(leaseExpiresAt).getTime()
+                if (expired) {
+                  logger.warn(`Task ${task.id} lease expired — marking as failed`)
+                  // Write a simple failed status to the file
+                  try {
+                    const updated = { ...task, status: 'failed', result: { status: 'failed', error: 'Task lease expired — bridge may have restarted', completedAt: new Date().toISOString() } }
+                    writeFileSync(filePath, JSON.stringify(updated, null, 2))
+                  } catch (writeErr) {
+                    logger.error(`Failed to mark expired task ${task.id}: ${writeErr}`)
+                  }
+                }
+              }
+            }
+            continue
+          }
           if (!this.agentNames.has(task.owner)) continue
           if (this.processing.has(task.id)) continue
 
@@ -80,8 +111,8 @@ export class TaskWatcher extends EventEmitter {
 
           logger.info(`Task ${task.id} assigned to ${task.owner}: "${task.subject}"`)
           this.emit('task-assigned', assignment)
-        } catch {
-          // Skip unparseable files
+        } catch (err) {
+          logger.debug(`Skipping unparseable task file ${file}: ${err}`)
         }
       }
     } catch (err) {

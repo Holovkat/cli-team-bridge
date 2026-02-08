@@ -1,4 +1,4 @@
-import { appendFileSync, appendFile } from 'fs'
+import { appendFileSync, appendFile, chmodSync } from 'fs'
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -12,14 +12,36 @@ export function configureLogger(level: LogLevel, file?: string) {
   logFile = file
 }
 
+const SECRET_PATTERNS = [
+  /sk-[a-zA-Z0-9_-]{20,}/g,          // OpenAI keys
+  /anthropic-[a-zA-Z0-9_-]{20,}/g,    // Anthropic keys
+  /ghp_[a-zA-Z0-9]{36}/g,             // GitHub PATs
+  /Bearer\s+[a-zA-Z0-9._-]+/gi,       // Bearer tokens
+  /api[_-]?key[=:]\s*[^\s,}]+/gi,     // Generic API keys
+]
+
+let logFilePermissionsSet = false
+
+function sanitize(message: string): string {
+  let result = message
+  for (const pattern of SECRET_PATTERNS) {
+    result = result.replace(pattern, '[REDACTED]')
+  }
+  return result
+}
+
 function formatMessage(level: LogLevel, message: string): string {
-  return `[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`
+  return `[${new Date().toISOString()}] [${level.toUpperCase()}] ${sanitize(message)}`
 }
 
 function writeToFileSync(formatted: string) {
   if (!logFile) return
   try {
     appendFileSync(logFile, formatted + '\n')
+    if (!logFilePermissionsSet) {
+      chmodSync(logFile, 0o600)
+      logFilePermissionsSet = true
+    }
   } catch {
     // Cannot write to log file — nowhere safe to report this
   }
@@ -28,7 +50,14 @@ function writeToFileSync(formatted: string) {
 function writeToFileAsync(formatted: string) {
   if (!logFile) return
   appendFile(logFile, formatted + '\n', () => {
-    // Fire and forget — errors silently ignored for non-critical log levels
+    if (!logFilePermissionsSet) {
+      try {
+        chmodSync(logFile!, 0o600)
+        logFilePermissionsSet = true
+      } catch {
+        // Ignore — best effort
+      }
+    }
   })
 }
 

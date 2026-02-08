@@ -4,13 +4,16 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { join } from 'path'
+import { resolve, sep, join } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { type BridgeConfig, isAgentAvailable, getAvailableModels } from './config'
 import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
+import { VERSION } from './version'
+import { TaskStore } from './persistence'
+import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled } from './metrics'
 
 interface ActiveTask {
   id: string
@@ -18,11 +21,16 @@ interface ActiveTask {
   model: string
   project: string
   prompt: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   startedAt: string
   completedAt?: string
   output?: string
   error?: string | null
+  proc?: { kill: (signal?: string) => void }
+  lastUpdate?: string
+  toolCallCount?: number
+  outputLength?: number
+  team?: string
 }
 
 const activeTasks = new Map<string, ActiveTask>()
@@ -44,12 +52,22 @@ function pruneCompletedTasks() {
 }
 
 export async function startMcpServer(config: BridgeConfig, workspaceRoot: string) {
+  const dbPath = join(workspaceRoot, '.bridge-tasks.db')
+  const taskStore = new TaskStore(dbPath)
+  taskStore.recoverOrphaned()
+
   const server = new Server(
-    { name: 'cli-team-bridge', version: '0.1.0' },
+    { name: 'cli-team-bridge', version: VERSION },
     { capabilities: { tools: {} } },
   )
 
+  // Authentication: For stdio transport, trust parent process (no auth needed).
+  // When HTTP/WS transport is added, validate bearer tokens from config.auth.tokens
+  // config.auth?.tokens can be checked against request headers in future transport layer
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    // MCP tool names use snake_case per protocol convention
+    // Internal TypeScript code uses camelCase
     tools: [
       {
         name: 'list_agents',
@@ -81,6 +99,10 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               type: 'string',
               description: 'Optional model override (e.g. "haiku", "custom:kimi-for-coding-[Kimi]-7")',
             },
+            team: {
+              type: 'string',
+              description: 'Optional team identifier for task isolation',
+            },
           },
           required: ['agent', 'prompt', 'project'],
         },
@@ -108,6 +130,22 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           required: ['task_id'],
         },
       },
+      {
+        name: 'cancel_task',
+        description: 'Cancel a running task by its ID. Sends SIGTERM to the agent process.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            task_id: { type: 'string', description: 'Task ID to cancel' },
+          },
+          required: ['task_id'],
+        },
+      },
+      {
+        name: 'get_metrics',
+        description: 'Get bridge metrics including task counts, success rates, and per-agent statistics.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
     ],
   }))
 
@@ -130,11 +168,32 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'assign_task': {
-        const { agent, prompt, project, model } = args as {
+        const { agent, prompt, project, model, team } = args as {
           agent: string
           prompt: string
           project: string
           model?: string
+          team?: string
+        }
+
+        // Validate inputs
+        const MAX_PROMPT_LENGTH = 100 * 1024 // 100KB
+        const MAX_NAME_LENGTH = 256
+
+        if (!agent || typeof agent !== 'string' || agent.length > MAX_NAME_LENGTH) {
+          return { content: [{ type: 'text', text: 'Invalid agent name' }], isError: true }
+        }
+        if (!prompt || typeof prompt !== 'string' || prompt.length > MAX_PROMPT_LENGTH) {
+          return { content: [{ type: 'text', text: `Prompt too large (max ${MAX_PROMPT_LENGTH} bytes)` }], isError: true }
+        }
+        if (!project || typeof project !== 'string' || project.length > MAX_NAME_LENGTH) {
+          return { content: [{ type: 'text', text: 'Invalid project name' }], isError: true }
+        }
+        if (/[\x00-\x1f]/.test(project)) {
+          return { content: [{ type: 'text', text: 'Project name contains control characters' }], isError: true }
+        }
+        if (model && (typeof model !== 'string' || model.length > MAX_NAME_LENGTH)) {
+          return { content: [{ type: 'text', text: 'Invalid model name' }], isError: true }
         }
 
         const agentConfig = config.agents[agent]
@@ -145,15 +204,34 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        if (!isAgentAvailable(agentConfig)) {
+        // Fallback agent support
+        let effectiveAgent = agent
+        let effectiveAgentConfig = agentConfig
+        if (!isAgentAvailable(agentConfig) && agentConfig.fallbackAgent) {
+          const fbConfig = config.agents[agentConfig.fallbackAgent]
+          if (fbConfig && isAgentAvailable(fbConfig)) {
+            logger.info(`[MCP] Agent "${agent}" unavailable, falling back to "${agentConfig.fallbackAgent}"`)
+            effectiveAgent = agentConfig.fallbackAgent
+            effectiveAgentConfig = fbConfig
+          }
+        }
+
+        if (!isAgentAvailable(effectiveAgentConfig)) {
           return {
             content: [{ type: 'text', text: `Agent "${agent}" is not available (adapter binary not found on PATH)` }],
             isError: true,
           }
         }
 
-        // Resolve and validate project path
-        const projectPath = join(workspaceRoot, project)
+        // Path traversal protection — resolve and verify containment
+        const projectPath = resolve(workspaceRoot, project)
+        const resolvedRoot = resolve(workspaceRoot)
+        if (!projectPath.startsWith(resolvedRoot + sep) && projectPath !== resolvedRoot) {
+          return {
+            content: [{ type: 'text', text: `Project path escapes workspace root: ${project}` }],
+            isError: true,
+          }
+        }
         if (!existsSync(projectPath)) {
           return {
             content: [{ type: 'text', text: `Project path does not exist: ${projectPath}` }],
@@ -161,24 +239,50 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        const taskId = randomUUID().slice(0, 8)
-        const modelId = model ?? agentConfig.defaultModel
+        // Enforce concurrent task limit
+        const MAX_CONCURRENT_RUNNING = 10
+        const runningCount = [...activeTasks.values()].filter(t => t.status === 'running').length
+        if (runningCount >= MAX_CONCURRENT_RUNNING) {
+          return {
+            content: [{ type: 'text', text: `Too many concurrent tasks (${runningCount}/${MAX_CONCURRENT_RUNNING}). Try again later.` }],
+            isError: true,
+          }
+        }
+
+        // Per-agent concurrency limit (check against effective agent)
+        const MAX_PER_AGENT = 3
+        const agentRunning = [...activeTasks.values()].filter(t => t.status === 'running' && t.agent === effectiveAgent).length
+        if (agentRunning >= MAX_PER_AGENT) {
+          return {
+            content: [{ type: 'text', text: `Agent "${effectiveAgent}" at capacity (${agentRunning}/${MAX_PER_AGENT} running). Try again later.` }],
+            isError: true,
+          }
+        }
+
+        const taskId = randomUUID()
+        const modelId = model ?? effectiveAgentConfig.defaultModel
 
         const task: ActiveTask = {
           id: taskId,
-          agent,
+          agent: effectiveAgent,
           model: modelId,
           project,
           prompt,
           status: 'running',
           startedAt: new Date().toISOString(),
+          lastUpdate: new Date().toISOString(),
+          toolCallCount: 0,
+          outputLength: 0,
+          team,
         }
         activeTasks.set(taskId, task)
+        recordTaskAssigned(effectiveAgent)
+        taskStore.save({ id: taskId, agent: effectiveAgent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
 
-        logger.info(`[MCP] Task ${taskId}: ${agent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
+        logger.info(`[MCP] Task ${taskId}: ${effectiveAgent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
 
         // Build spawn config with project-specific cwd
-        const spawnConfig = buildSpawnConfig(agent, agentConfig)
+        const spawnConfig = buildSpawnConfig(effectiveAgent, effectiveAgentConfig)
         spawnConfig.cwd = projectPath
 
         // Run async — don't block the MCP response
@@ -188,6 +292,12 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.completedAt = new Date().toISOString()
             task.output = result.output
             task.error = result.error
+            task.lastUpdate = task.completedAt
+            task.outputLength = (result.output ?? '').length
+            const durationMs = new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()
+            if (task.status === 'completed') recordTaskCompleted(effectiveAgent, durationMs)
+            else recordTaskFailed(effectiveAgent, durationMs)
+            taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
             logger.info(`[MCP] Task ${taskId} ${task.status}`)
             pruneCompletedTasks()
           })
@@ -195,6 +305,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.status = 'failed'
             task.completedAt = new Date().toISOString()
             task.error = String(err)
+            recordTaskFailed(effectiveAgent, Date.now() - new Date(task.startedAt).getTime())
+            taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
             logger.error(`[MCP] Task ${taskId} error: ${err}`)
             pruneCompletedTasks()
           })
@@ -208,6 +320,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               agent,
               model: modelId,
               project,
+              team: team ?? null,
               message: `Task assigned. Use get_task_status("${taskId}") to check progress.`,
             }, null, 2),
           }],
@@ -216,7 +329,14 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_task_status': {
         const { task_id } = args as { task_id: string }
-        const task = activeTasks.get(task_id)
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
+        const task = activeTasks.get(task_id) ?? (() => {
+          const persisted = taskStore.get(task_id)
+          if (!persisted) return undefined
+          return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
+        })()
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
         }
@@ -231,6 +351,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               project: task.project,
               startedAt: task.startedAt,
               completedAt: task.completedAt ?? null,
+              lastUpdate: task.lastUpdate ?? null,
+              toolCallCount: task.toolCallCount ?? 0,
+              outputLength: task.outputLength ?? 0,
             }, null, 2),
           }],
         }
@@ -238,7 +361,14 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_task_result': {
         const { task_id } = args as { task_id: string }
-        const task = activeTasks.get(task_id)
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
+        const task = activeTasks.get(task_id) ?? (() => {
+          const persisted = taskStore.get(task_id)
+          if (!persisted) return undefined
+          return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
+        })()
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
         }
@@ -263,6 +393,39 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             }, null, 2),
           }],
         }
+      }
+
+      case 'cancel_task': {
+        const { task_id } = args as { task_id: string }
+        if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
+          return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
+        }
+        const task = activeTasks.get(task_id)
+        if (!task) {
+          return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
+        }
+        if (task.status !== 'running') {
+          return { content: [{ type: 'text', text: `Task "${task_id}" is not running (status: ${task.status})` }], isError: true }
+        }
+        if (task.proc) {
+          try {
+            task.proc.kill('SIGTERM')
+          } catch {
+            // Process may have already exited
+          }
+        }
+        task.status = 'cancelled'
+        task.completedAt = new Date().toISOString()
+        task.error = 'Cancelled by user'
+        recordTaskCancelled(task.agent)
+        logger.info(`[MCP] Task ${task_id} cancelled`)
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ task_id, status: 'cancelled', message: 'Task cancelled successfully' }, null, 2) }],
+        }
+      }
+
+      case 'get_metrics': {
+        return { content: [{ type: 'text', text: JSON.stringify(getMetricsSummary(), null, 2) }] }
       }
 
       default:

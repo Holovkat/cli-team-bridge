@@ -28,6 +28,32 @@
       },
       "strengths": ["architecture", "complex reasoning", "code review"]
     },
+    "gemini": {
+      "type": "acp",
+      "command": "gemini",
+      "args": ["--experimental-acp"],
+      "cwd": "/app",
+      "defaultModel": "gemini-3-pro",
+      "models": {
+        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro" },
+        "gemini-3-flash": { "flag": "--model", "value": "gemini-3-flash" },
+        "gemini-2.5-pro": { "flag": "--model", "value": "gemini-2.5-pro" },
+        "gemini-2.5-flash": { "flag": "--model", "value": "gemini-2.5-flash" }
+      },
+      "strengths": ["multimodal", "large context window", "code generation"]
+    },
+    "qwen": {
+      "type": "acp",
+      "command": "qwen",
+      "args": ["--acp"],
+      "cwd": "/app",
+      "defaultModel": "coder-model",
+      "models": {
+        "coder-model": { "flag": "--model", "value": "coder-model" },
+        "vision-model": { "flag": "--model", "value": "vision-model" }
+      },
+      "strengths": ["multilingual", "code generation", "reasoning"]
+    },
     "droid": {
       "type": "acp",
       "command": "droid-acp",

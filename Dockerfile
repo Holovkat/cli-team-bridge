@@ -1,4 +1,4 @@
-FROM oven/bun:latest
+FROM oven/bun:1.2.0
 
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 
@@ -12,12 +12,21 @@ RUN bun install -g @anthropic-ai/claude-code@latest
 RUN bun install -g @openai/codex@latest
 RUN bun install -g @factory/cli@latest
 
-# Create writable dirs for adapter state
-RUN mkdir -p /root/.codex /root/.factory /root/.claude
+# Install CLIs with built-in ACP support (no separate adapter needed)
+RUN bun install -g @google/gemini-cli@latest
+RUN bun install -g qwen-code@latest
+
+# Create non-root user for security
+RUN groupadd -r bridge && useradd -r -g bridge -d /home/bridge -s /bin/bash bridge
+RUN mkdir -p /home/bridge/.codex /home/bridge/.factory /home/bridge/.claude
 
 WORKDIR /app
 COPY package.json bun.lock* ./
 RUN bun install
 COPY . .
+
+# Set ownership and switch to non-root user
+RUN chown -R bridge:bridge /home/bridge /app
+USER bridge
 
 CMD ["bun", "run", "src/index.ts"]

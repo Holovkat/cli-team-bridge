@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { parseArgs } from 'util'
-import { loadConfig } from './config'
+import { loadConfig, type BridgeConfig } from './config'
 import { configureLogger, logger } from './logger'
 import { generateManifest } from './manifest'
 import { TaskWatcher, type TaskAssignment } from './task-watcher'
@@ -9,6 +9,8 @@ import { writeTaskResult, markTaskInProgress, type TaskResult } from './result-w
 import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { startMcpServer } from './mcp-server'
+import { VERSION } from './version'
+import { withRetry } from './retry'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -17,7 +19,7 @@ const { values } = parseArgs({
     config: { type: 'string', default: './bridge.config.json' },
     mode: { type: 'string', default: 'both' }, // watcher | mcp | both
   },
-  strict: true,
+  strict: false,
 })
 
 const mode = values.mode as 'watcher' | 'mcp' | 'both'
@@ -28,13 +30,13 @@ if (mode !== 'mcp' && !values.team) {
   process.exit(1)
 }
 
-const config = await loadConfig(values.config!)
-configureLogger(config.logging.level as any, config.logging.file)
+const config = await loadConfig(values.config as string)
+configureLogger(config.logging.level, config.logging.file)
 
 // Startup banner
 console.error(`
 ╔══════════════════════════════════════════╗
-║       CLI Team Bridge v0.1.0             ║
+║       CLI Team Bridge v${VERSION}             ║
 ║       ACP Multi-Agent Coordinator        ║
 ╚══════════════════════════════════════════╝
 `)
@@ -54,7 +56,7 @@ if (mode === 'watcher' || mode === 'both') {
   const CLAUDE_DIR = process.env['HOME']
     ? join(process.env['HOME'], '.claude')
     : '/root/.claude'
-  const taskDir = join(CLAUDE_DIR, 'tasks', values.team!)
+  const taskDir = join(CLAUDE_DIR, 'tasks', values.team as string)
 
   if (!existsSync(taskDir)) {
     mkdirSync(taskDir, { recursive: true })
@@ -67,7 +69,7 @@ if (mode === 'watcher' || mode === 'both') {
 
   const watcher = new TaskWatcher(config, taskDir)
 
-  watcher.on('task-assigned', async (assignment: TaskAssignment) => {
+  async function handleTaskAssignment(assignment: TaskAssignment, config: BridgeConfig, watcher: TaskWatcher): Promise<void> {
     const { task, filePath, modelOverride } = assignment
     const agentConfig = config.agents[task.owner]
 
@@ -78,7 +80,10 @@ if (mode === 'watcher' || mode === 'both') {
     }
 
     try {
-      await markTaskInProgress(filePath, taskDir)
+      const marked = await markTaskInProgress(filePath, taskDir)
+      if (!marked) {
+        logger.warn(`Failed to mark task ${task.id} as in_progress`)
+      }
 
       const spawnConfig = buildSpawnConfig(task.owner, agentConfig)
       const model = modelOverride ?? agentConfig.defaultModel
@@ -86,7 +91,11 @@ if (mode === 'watcher' || mode === 'both') {
       logger.info(`Starting ACP session for task ${task.id} with ${task.owner} (model: ${model})`)
       const startedAt = new Date().toISOString()
 
-      const acpResult = await runAcpSession(spawnConfig, task.description, model)
+      const acpResult = await withRetry(
+        () => runAcpSession(spawnConfig, task.description, model),
+        { maxRetries: 2, baseDelayMs: 5000, maxDelayMs: 30000 },
+        `task-${task.id}`,
+      )
       const completedAt = new Date().toISOString()
 
       const result: TaskResult = {
@@ -99,7 +108,10 @@ if (mode === 'watcher' || mode === 'both') {
         error: acpResult.error,
       }
 
-      await writeTaskResult(filePath, result, taskDir)
+      const written = await writeTaskResult(filePath, result, taskDir)
+      if (!written) {
+        logger.warn(`Failed to write result for task ${task.id}`)
+      }
     } catch (err) {
       logger.error(`Task ${task.id} failed: ${err}`)
       const result: TaskResult = {
@@ -111,10 +123,19 @@ if (mode === 'watcher' || mode === 'both') {
         output: '',
         error: String(err),
       }
-      await writeTaskResult(filePath, result, taskDir)
+      const written = await writeTaskResult(filePath, result, taskDir)
+      if (!written) {
+        logger.warn(`Failed to write result for task ${task.id}`)
+      }
     } finally {
       watcher.markComplete(task.id)
     }
+  }
+
+  watcher.on('task-assigned', (assignment: TaskAssignment) => {
+    handleTaskAssignment(assignment, config, watcher).catch((err) => {
+      logger.error(`Unhandled error in task handler: ${err}`)
+    })
   })
 
   watcher.start()
@@ -131,9 +152,28 @@ if (mode === 'watcher' || mode === 'both') {
   process.on('SIGHUP', async () => {
     logger.info('SIGHUP received — reloading config and manifest')
     try {
-      const newConfig = await loadConfig(values.config!)
+      const newConfig = await loadConfig(values.config as string)
+      // Log what changed
+      const changedKeys: string[] = []
+      for (const key of Object.keys(newConfig) as (keyof BridgeConfig)[]) {
+        if (JSON.stringify(config[key]) !== JSON.stringify(newConfig[key])) {
+          changedKeys.push(key)
+        }
+      }
+      if (changedKeys.length > 0) {
+        logger.info(`Config changes detected in: ${changedKeys.join(', ')}`)
+      } else {
+        logger.info('No config changes detected')
+      }
+      // Deep replace — Object.assign is shallow, leaves stale nested objects
+      for (const key of Object.keys(config) as (keyof BridgeConfig)[]) {
+        delete (config as any)[key]
+      }
       Object.assign(config, newConfig)
+      // Reinitialize watcher with new config
+      watcher.updateAgents(config)
       await generateManifest(config, taskDir)
+      logger.info('Config reloaded successfully')
     } catch (err) {
       logger.error(`Reload failed: ${err}`)
     }

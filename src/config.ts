@@ -1,6 +1,43 @@
 import { execFileSync } from 'child_process'
+import { z } from 'zod'
 import { logger } from './logger'
 
+const ModelConfigSchema = z.object({
+  flag: z.string(),
+  value: z.string(),
+  keyEnv: z.string().optional(),
+  provider: z.string().optional(),
+})
+
+const AgentConfigSchema = z.object({
+  type: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  cwd: z.string(),
+  defaultModel: z.string(),
+  models: z.record(z.string(), ModelConfigSchema),
+  strengths: z.array(z.string()),
+  env: z.record(z.string(), z.string()).optional(),
+  fallbackAgent: z.string().optional(),
+})
+
+const BridgeConfigSchema = z.object({
+  workspaceRoot: z.string(),
+  agents: z.record(z.string(), AgentConfigSchema),
+  /** Currently unused — reserved for future manual-approval workflow */
+  permissions: z.object({ autoApprove: z.boolean() }),
+  polling: z.object({ intervalMs: z.number().min(500).max(60000) }),
+  logging: z.object({
+    level: z.enum(['debug', 'info', 'warn', 'error']),
+    file: z.string().optional(),
+  }),
+})
+
+/**
+ * Model configuration for an agent.
+ * `keyEnv` is used at runtime to pass API keys.
+ * `flag`, `value`, `provider` are metadata used by config tooling and reserved for non-ACP agent types.
+ */
 export interface ModelConfig {
   flag: string
   value: string
@@ -17,14 +54,16 @@ export interface AgentConfig {
   models: Record<string, ModelConfig>
   strengths: string[]
   env?: Record<string, string>
+  fallbackAgent?: string
 }
 
 export interface BridgeConfig {
   workspaceRoot: string
   agents: Record<string, AgentConfig>
+  /** Currently unused — reserved for future manual-approval workflow */
   permissions: { autoApprove: boolean }
   polling: { intervalMs: number }
-  logging: { level: string; file?: string }
+  logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
 }
 
 export async function loadConfig(path: string): Promise<BridgeConfig> {
@@ -33,15 +72,24 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     throw new Error(`Config file not found: ${path}`)
   }
 
-  const config: BridgeConfig = await file.json()
+  const raw = await file.json()
+  const config = BridgeConfigSchema.parse(raw) as BridgeConfig
 
   if (!config.agents || Object.keys(config.agents).length === 0) {
     throw new Error('Config must define at least one agent')
   }
 
+  const ALLOWED_COMMANDS = new Set([
+    'codex-acp', 'claude-code-acp', 'droid-acp',
+    'gemini', 'qwen',
+  ])
+
   // Validate each agent and check env vars
   for (const [name, agent] of Object.entries(config.agents)) {
     if (!agent.command) throw new Error(`Agent "${name}" missing command`)
+    if (!ALLOWED_COMMANDS.has(agent.command)) {
+      throw new Error(`Agent "${name}" command "${agent.command}" not in allowlist: ${[...ALLOWED_COMMANDS].join(', ')}`)
+    }
     if (!agent.defaultModel) throw new Error(`Agent "${name}" missing defaultModel`)
 
     if (!agent.models[agent.defaultModel]) {
@@ -68,7 +116,7 @@ export function getAvailableModels(agent: AgentConfig): string[] {
     return Object.keys(agent.models)
   }
   return Object.entries(agent.models)
-    .filter(([_, m]) => m.keyEnv && !!process.env[m.keyEnv])
+    .filter(([, m]) => m.keyEnv && !!process.env[m.keyEnv])
     .map(([name]) => name)
 }
 

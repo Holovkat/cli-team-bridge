@@ -3,10 +3,10 @@ services:
     build: .
     container_name: cli-team-bridge
     volumes:
-      - .:/app                                       # Bridge source (live reload)
-      - /Users/tonyholovka/.claude:/root/.claude      # Task files + team config (rw)
-      - /Users/tonyholovka/workspace:/workspace:ro    # Project workspaces (read-only for agents)
-      - node_modules:/app/node_modules                # Persist deps
+      - .:/app                                                    # Bridge source (live reload)
+      - /Users/tonyholovka/.claude/tasks:/home/bridge/.claude/tasks  # Task files only (not full .claude)
+      - /Users/tonyholovka/workspace:/workspace:ro                # Project workspaces (read-only)
+      - node_modules:/app/node_modules                            # Persist deps
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -16,6 +16,11 @@ services:
     working_dir: /app
     command: bun run src/index.ts --team ${TEAM_ID:-test-bridge} --config bridge.config.json --mode watcher
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
