@@ -153,11 +153,25 @@ if (mode === 'watcher' || mode === 'both') {
     logger.info('SIGHUP received — reloading config and manifest')
     try {
       const newConfig = await loadConfig(values.config as string)
+      // Log what changed
+      const changedKeys: string[] = []
+      for (const key of Object.keys(newConfig) as (keyof BridgeConfig)[]) {
+        if (JSON.stringify(config[key]) !== JSON.stringify(newConfig[key])) {
+          changedKeys.push(key)
+        }
+      }
+      if (changedKeys.length > 0) {
+        logger.info(`Config changes detected in: ${changedKeys.join(', ')}`)
+      } else {
+        logger.info('No config changes detected')
+      }
       // Deep replace — Object.assign is shallow, leaves stale nested objects
       for (const key of Object.keys(config) as (keyof BridgeConfig)[]) {
         delete (config as any)[key]
       }
       Object.assign(config, newConfig)
+      // Reinitialize watcher with new config
+      watcher.updateAgents(config)
       await generateManifest(config, taskDir)
       logger.info('Config reloaded successfully')
     } catch (err) {

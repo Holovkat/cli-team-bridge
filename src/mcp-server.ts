@@ -13,6 +13,7 @@ import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
 import { VERSION } from './version'
 import { TaskStore } from './persistence'
+import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled } from './metrics'
 
 interface ActiveTask {
   id: string
@@ -29,6 +30,7 @@ interface ActiveTask {
   lastUpdate?: string
   toolCallCount?: number
   outputLength?: number
+  team?: string
 }
 
 const activeTasks = new Map<string, ActiveTask>()
@@ -97,6 +99,10 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               type: 'string',
               description: 'Optional model override (e.g. "haiku", "custom:kimi-for-coding-[Kimi]-7")',
             },
+            team: {
+              type: 'string',
+              description: 'Optional team identifier for task isolation',
+            },
           },
           required: ['agent', 'prompt', 'project'],
         },
@@ -135,6 +141,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           required: ['task_id'],
         },
       },
+      {
+        name: 'get_metrics',
+        description: 'Get bridge metrics including task counts, success rates, and per-agent statistics.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
     ],
   }))
 
@@ -157,11 +168,12 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'assign_task': {
-        const { agent, prompt, project, model } = args as {
+        const { agent, prompt, project, model, team } = args as {
           agent: string
           prompt: string
           project: string
           model?: string
+          team?: string
         }
 
         // Validate inputs
@@ -237,22 +249,22 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        // Per-agent concurrency limit
+        // Per-agent concurrency limit (check against effective agent)
         const MAX_PER_AGENT = 3
-        const agentRunning = [...activeTasks.values()].filter(t => t.status === 'running' && t.agent === agent).length
+        const agentRunning = [...activeTasks.values()].filter(t => t.status === 'running' && t.agent === effectiveAgent).length
         if (agentRunning >= MAX_PER_AGENT) {
           return {
-            content: [{ type: 'text', text: `Agent "${agent}" at capacity (${agentRunning}/${MAX_PER_AGENT} running). Try again later.` }],
+            content: [{ type: 'text', text: `Agent "${effectiveAgent}" at capacity (${agentRunning}/${MAX_PER_AGENT} running). Try again later.` }],
             isError: true,
           }
         }
 
         const taskId = randomUUID()
-        const modelId = model ?? agentConfig.defaultModel
+        const modelId = model ?? effectiveAgentConfig.defaultModel
 
         const task: ActiveTask = {
           id: taskId,
-          agent,
+          agent: effectiveAgent,
           model: modelId,
           project,
           prompt,
@@ -261,14 +273,16 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           lastUpdate: new Date().toISOString(),
           toolCallCount: 0,
           outputLength: 0,
+          team,
         }
         activeTasks.set(taskId, task)
-        taskStore.save({ id: taskId, agent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
+        recordTaskAssigned(effectiveAgent)
+        taskStore.save({ id: taskId, agent: effectiveAgent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
 
-        logger.info(`[MCP] Task ${taskId}: ${agent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
+        logger.info(`[MCP] Task ${taskId}: ${effectiveAgent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
 
         // Build spawn config with project-specific cwd
-        const spawnConfig = buildSpawnConfig(agent, agentConfig)
+        const spawnConfig = buildSpawnConfig(effectiveAgent, effectiveAgentConfig)
         spawnConfig.cwd = projectPath
 
         // Run async — don't block the MCP response
@@ -280,6 +294,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.error = result.error
             task.lastUpdate = task.completedAt
             task.outputLength = (result.output ?? '').length
+            const durationMs = new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()
+            if (task.status === 'completed') recordTaskCompleted(effectiveAgent, durationMs)
+            else recordTaskFailed(effectiveAgent, durationMs)
             taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
             logger.info(`[MCP] Task ${taskId} ${task.status}`)
             pruneCompletedTasks()
@@ -288,6 +305,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.status = 'failed'
             task.completedAt = new Date().toISOString()
             task.error = String(err)
+            recordTaskFailed(effectiveAgent, Date.now() - new Date(task.startedAt).getTime())
             taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
             logger.error(`[MCP] Task ${taskId} error: ${err}`)
             pruneCompletedTasks()
@@ -302,6 +320,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               agent,
               model: modelId,
               project,
+              team: team ?? null,
               message: `Task assigned. Use get_task_status("${taskId}") to check progress.`,
             }, null, 2),
           }],
@@ -398,10 +417,15 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         task.status = 'cancelled'
         task.completedAt = new Date().toISOString()
         task.error = 'Cancelled by user'
+        recordTaskCancelled(task.agent)
         logger.info(`[MCP] Task ${task_id} cancelled`)
         return {
           content: [{ type: 'text', text: JSON.stringify({ task_id, status: 'cancelled', message: 'Task cancelled successfully' }, null, 2) }],
         }
+      }
+
+      case 'get_metrics': {
+        return { content: [{ type: 'text', text: JSON.stringify(getMetricsSummary(), null, 2) }] }
       }
 
       default:

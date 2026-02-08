@@ -138,13 +138,13 @@
 **Priority**: P2
 
 ### Tasks
-- [ ] 9.1 Per-agent concurrency limits
-- [ ] 9.2 Agent health checks with circuit breaker
-- [ ] 9.3 Graceful degradation / fallback agent
-- [ ] 9.4 Metrics & observability (new `metrics.ts`)
-- [ ] 9.5 Streaming progress for long-running tasks
-- [ ] 9.6 Multi-team isolation
-- [ ] 9.7 Complete config hot-reload
+- [x] 9.1 Per-agent concurrency limits
+- [x] 9.2 Agent health checks with circuit breaker
+- [x] 9.3 Graceful degradation / fallback agent
+- [x] 9.4 Metrics & observability (new `metrics.ts`)
+- [x] 9.5 Streaming progress for long-running tasks
+- [x] 9.6 Multi-team isolation
+- [x] 9.7 Complete config hot-reload
 
 ---
 
@@ -160,8 +160,8 @@
 | 6 | Cleanup | 8 | 8 | **Complete** |
 | 7 | Production Resilience | 5 | 5 | **Complete** |
 | 8 | Testing | 9 | 9 | **Complete** |
-| 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **45** | |
+| 9 | Production P2 | 7 | 7 | **Complete** |
+| **Total** | | **52** | **52** | **All Complete** |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

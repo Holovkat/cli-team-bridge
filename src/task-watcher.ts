@@ -53,6 +53,17 @@ export class TaskWatcher extends EventEmitter {
     this.processing.delete(taskId)
   }
 
+  updateAgents(config: BridgeConfig): void {
+    this.agentNames = new Set(Object.keys(config.agents))
+    this.intervalMs = config.polling.intervalMs
+    logger.info(`Watcher updated — agents: ${[...this.agentNames].join(', ')}, interval: ${this.intervalMs}ms`)
+    // Restart timer with new interval
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = setInterval(() => this.poll(), this.intervalMs)
+    }
+  }
+
   private poll() {
     try {
       const files = readdirSync(this.taskDir).filter(f => f.endsWith('.json') && f !== 'bridge-manifest.json')
