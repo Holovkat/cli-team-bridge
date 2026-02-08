@@ -75,19 +75,75 @@ cd cli-team-bridge
 bun install
 ```
 
+## Setting up Claude Code
+
+### Step 1: Enable Agent Teams (optional but recommended)
+
+[Agent Teams](https://code.claude.com/docs/en/agent-teams) is an experimental Claude Code feature that lets you coordinate multiple Claude Code sessions. While the bridge works without it, enabling it lets you combine Claude-to-Claude coordination with cross-vendor delegation.
+
+Add to your Claude Code settings (`~/.claude/settings.json`):
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+Or set it in your shell before launching Claude Code:
+
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+### Step 2: Register the bridge as an MCP server
+
+```bash
+claude mcp add cli-team-bridge -- bun run /path/to/cli-team-bridge/src/index.ts --mode mcp --config /path/to/cli-team-bridge/bridge.config.local.json
+```
+
+This registers the bridge so Claude Code can call its tools. The MCP server loads at session startup, so you need to start a **new Claude Code session** after adding it.
+
+### Step 3: Verify it works
+
+Start a new Claude Code session and try:
+
+```
+> List available agents from the bridge
+```
+
+You should see all configured agents with their models and strengths.
+
+### Using Agent Teams with the bridge
+
+With Agent Teams enabled, you can have Claude Code spawn teammates that each use the bridge to delegate to different external agents:
+
+```
+Create an agent team to review cli-team-bridge from different angles.
+Have one teammate ask codex to do a code quality review,
+another teammate ask gemini for a security audit,
+and a third teammate ask droid for an error handling review.
+Synthesize all findings when they're done.
+```
+
+The team lead coordinates the Claude teammates, each teammate calls the bridge's MCP tools to dispatch work to external agents, and results flow back through the team.
+
+**Key Agent Teams controls:**
+- `Shift+Up/Down` — select and message teammates directly
+- `Shift+Tab` — toggle delegate mode (lead coordinates only, no code edits)
+- `Ctrl+T` — view shared task list
+- Split pane mode requires `tmux` or iTerm2
+
+See the [Agent Teams docs](https://code.claude.com/docs/en/agent-teams) for full details.
+
 ## Usage
 
 The bridge runs in two modes: **MCP** (for Claude Code integration) and **Watcher** (file-based task polling).
 
 ### MCP mode (recommended)
 
-Register the bridge as an MCP server in Claude Code:
-
-```bash
-claude mcp add cli-team-bridge -- bun run /path/to/cli-team-bridge/src/index.ts --mode mcp --config /path/to/cli-team-bridge/bridge.config.local.json
-```
-
-Start a **new Claude Code session**, then use natural language:
+Start a **new Claude Code session** (after registering the bridge above), then use natural language:
 
 ```
 > List available agents from the bridge
