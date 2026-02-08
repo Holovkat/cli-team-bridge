@@ -44,10 +44,10 @@
       "command": "qwen",
       "args": ["--acp"],
       "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
-      "defaultModel": "qwen3-coder",
+      "defaultModel": "coder-model",
       "models": {
-        "qwen3-coder": { "flag": "--model", "value": "qwen3-coder" },
-        "qwen3": { "flag": "--model", "value": "qwen3" }
+        "coder-model": { "flag": "--model", "value": "coder-model" },
+        "vision-model": { "flag": "--model", "value": "vision-model" }
       },
       "strengths": ["multilingual", "code generation", "reasoning"]
     },
