@@ -39,9 +39,16 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     throw new Error('Config must define at least one agent')
   }
 
+  const ALLOWED_COMMANDS = new Set([
+    'codex-acp', 'claude-code-acp', 'droid-acp',
+  ])
+
   // Validate each agent and check env vars
   for (const [name, agent] of Object.entries(config.agents)) {
     if (!agent.command) throw new Error(`Agent "${name}" missing command`)
+    if (!ALLOWED_COMMANDS.has(agent.command)) {
+      throw new Error(`Agent "${name}" command "${agent.command}" not in allowlist: ${[...ALLOWED_COMMANDS].join(', ')}`)
+    }
     if (!agent.defaultModel) throw new Error(`Agent "${name}" missing defaultModel`)
 
     if (!agent.models[agent.defaultModel]) {

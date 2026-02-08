@@ -26,10 +26,10 @@
 **Priority**: P0
 
 ### Tasks
-- [ ] 2.1 Add command allowlist validation (`config.ts`)
-- [ ] 2.2 Sanitize sensitive data from logs (`logger.ts`)
-- [ ] 2.3 Harden Dockerfile — non-root user, pin versions (`Dockerfile`)
-- [ ] 2.4 Restrict Docker volume mounts (`docker-compose.yml`)
+- [x] 2.1 Add command allowlist validation (`config.ts`)
+- [x] 2.2 Sanitize sensitive data from logs (`logger.ts`)
+- [x] 2.3 Harden Dockerfile — non-root user, pin versions (`Dockerfile`)
+- [x] 2.4 Restrict Docker volume mounts (`docker-compose.yml`)
 
 ---
 
@@ -153,7 +153,7 @@
 | Sprint | Shard | Tasks | Done | Status |
 |--------|-------|-------|------|--------|
 | 1 | Security Critical | 3 | 3 | **Complete** |
-| 2 | Security High | 4 | 0 | Pending |
+| 2 | Security High | 4 | 4 | **Complete** |
 | 3 | Security Med/Low | 6 | 0 | Pending |
 | 4 | Typing & Validation | 4 | 0 | Pending |
 | 5 | Error Handling | 6 | 0 | Pending |
@@ -161,7 +161,7 @@
 | 7 | Production Resilience | 5 | 0 | Pending |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **3** | |
+| **Total** | | **52** | **7** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**
