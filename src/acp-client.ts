@@ -246,7 +246,7 @@ export async function runAcpSession(
       withTimeout(
         connection.initialize({
           protocolVersion: 1,
-          clientCapabilities: { fs: { read: true, write: true } },
+          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
           clientInfo: { name: 'cli-team-bridge', version: VERSION },
         } as any),
         INIT_TIMEOUT_MS,

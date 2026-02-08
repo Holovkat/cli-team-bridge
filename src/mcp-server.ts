@@ -4,7 +4,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { resolve, sep } from 'path'
+import { resolve, sep, join } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { type BridgeConfig, isAgentAvailable, getAvailableModels } from './config'
@@ -12,6 +12,7 @@ import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
 import { VERSION } from './version'
+import { TaskStore } from './persistence'
 
 interface ActiveTask {
   id: string
@@ -45,6 +46,10 @@ function pruneCompletedTasks() {
 }
 
 export async function startMcpServer(config: BridgeConfig, workspaceRoot: string) {
+  const dbPath = join(workspaceRoot, '.bridge-tasks.db')
+  const taskStore = new TaskStore(dbPath)
+  taskStore.recoverOrphaned()
+
   const server = new Server(
     { name: 'cli-team-bridge', version: VERSION },
     { capabilities: { tools: {} } },
@@ -214,6 +219,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           startedAt: new Date().toISOString(),
         }
         activeTasks.set(taskId, task)
+        taskStore.save({ id: taskId, agent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
 
         logger.info(`[MCP] Task ${taskId}: ${agent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
 
@@ -228,6 +234,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.completedAt = new Date().toISOString()
             task.output = result.output
             task.error = result.error
+            taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
             logger.info(`[MCP] Task ${taskId} ${task.status}`)
             pruneCompletedTasks()
           })
@@ -235,6 +242,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.status = 'failed'
             task.completedAt = new Date().toISOString()
             task.error = String(err)
+            taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
             logger.error(`[MCP] Task ${taskId} error: ${err}`)
             pruneCompletedTasks()
           })
@@ -259,7 +267,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
           return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
         }
-        const task = activeTasks.get(task_id)
+        const task = activeTasks.get(task_id) ?? (() => {
+          const persisted = taskStore.get(task_id)
+          if (!persisted) return undefined
+          return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
+        })()
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
         }
@@ -284,7 +296,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         if (!task_id || typeof task_id !== 'string' || !/^[a-f0-9-]{8,36}$/.test(task_id)) {
           return { content: [{ type: 'text', text: 'Invalid task_id format' }], isError: true }
         }
-        const task = activeTasks.get(task_id)
+        const task = activeTasks.get(task_id) ?? (() => {
+          const persisted = taskStore.get(task_id)
+          if (!persisted) return undefined
+          return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
+        })()
         if (!task) {
           return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
         }

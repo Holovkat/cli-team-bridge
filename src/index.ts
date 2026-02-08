@@ -10,6 +10,7 @@ import { runAcpSession } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { startMcpServer } from './mcp-server'
 import { VERSION } from './version'
+import { withRetry } from './retry'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -90,7 +91,11 @@ if (mode === 'watcher' || mode === 'both') {
       logger.info(`Starting ACP session for task ${task.id} with ${task.owner} (model: ${model})`)
       const startedAt = new Date().toISOString()
 
-      const acpResult = await runAcpSession(spawnConfig, task.description, model)
+      const acpResult = await withRetry(
+        () => runAcpSession(spawnConfig, task.description, model),
+        { maxRetries: 2, baseDelayMs: 5000, maxDelayMs: 30000 },
+        `task-${task.id}`,
+      )
       const completedAt = new Date().toISOString()
 
       const result: TaskResult = {
