@@ -119,15 +119,15 @@
 **Priority**: P1
 
 ### Tasks
-- [ ] 8.1 Set up test infrastructure (Bun test runner)
-- [ ] 8.2 Config validation tests
-- [ ] 8.3 Lock manager tests
-- [ ] 8.4 Path traversal tests
-- [ ] 8.5 Agent adapters tests
-- [ ] 8.6 Logger tests
-- [ ] 8.7 Result writer tests
-- [ ] 8.8 Task watcher tests
-- [ ] 8.9 MCP server integration tests
+- [x] 8.1 Set up test infrastructure (Bun test runner)
+- [x] 8.2 Config validation tests
+- [x] 8.3 Lock manager tests
+- [x] 8.4 Path traversal tests
+- [x] 8.5 Agent adapters tests
+- [x] 8.6 Logger tests
+- [x] 8.7 Result writer tests
+- [x] 8.8 Task watcher tests
+- [x] 8.9 MCP server integration tests
 
 ---
 
@@ -159,9 +159,9 @@
 | 5 | Error Handling | 6 | 6 | **Complete** |
 | 6 | Cleanup | 8 | 8 | **Complete** |
 | 7 | Production Resilience | 5 | 5 | **Complete** |
-| 8 | Testing | 9 | 0 | Pending |
+| 8 | Testing | 9 | 9 | **Complete** |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **36** | |
+| **Total** | | **52** | **45** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**
