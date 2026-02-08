@@ -18,6 +18,7 @@ const AgentConfigSchema = z.object({
   models: z.record(z.string(), ModelConfigSchema),
   strengths: z.array(z.string()),
   env: z.record(z.string(), z.string()).optional(),
+  fallbackAgent: z.string().optional(),
 })
 
 const BridgeConfigSchema = z.object({
@@ -53,6 +54,7 @@ export interface AgentConfig {
   models: Record<string, ModelConfig>
   strengths: string[]
   env?: Record<string, string>
+  fallbackAgent?: string
 }
 
 export interface BridgeConfig {

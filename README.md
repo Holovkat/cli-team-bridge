@@ -20,7 +20,7 @@ All three agents can run concurrently — each gets its own child process.
 | **codex** | `codex-acp` | `gpt-5.3-codex` | OAuth (`codex login`) |
 | **claude-code** | `claude-code-acp` | `opus` | OAuth (`claude login`) |
 | **gemini** | `gemini --experimental-acp` | `gemini-3-pro` | OAuth (`gemini login`) |
-| **qwen** | `qwen --acp` | `qwen3-coder` | API key (`DASHSCOPE_API_KEY`) |
+| **qwen** | `qwen --acp` | `coder-model` | API key (`DASHSCOPE_API_KEY`) |
 | **droid** | `droid-acp` | `custom:kimi-for-coding-[Kimi]-7` | OAuth (`droid login`) |
 
 Each agent supports multiple models — see [Configuration](#configuration) for the full list. Gemini and Qwen have built-in ACP support (no separate adapter binary needed).
@@ -170,36 +170,42 @@ Two config files are provided:
 3. Define available models with their CLI flags
 4. Install the adapter binary globally (`bun install -g <package>`)
 
-### Example: Ollama (local models)
+### Example: Ollama (local models via Droid/Factory)
 
-Droid supports routing through Ollama for local model inference. Add an Ollama-backed agent to your config:
+Ollama models can be used through the Droid/Factory adapter. First, configure your Ollama models as custom models in Factory (`~/.factory/settings.json`), then reference them in your bridge config using the `custom:` prefix and `"provider": "factory"`.
+
+**Step 1**: Ensure Ollama is running with your models pulled:
+
+```bash
+ollama serve                    # start the server
+ollama pull nemotron-3-nano     # pull a model
+```
+
+**Step 2**: Configure the model in Factory (via `droid` CLI or `~/.factory/settings.json`). The model appears with an ID like `custom:nemotron-3-nano-[Ollama]-37`.
+
+**Step 3**: Add it to your bridge config under the `droid` agent's models:
 
 ```jsonc
-"ollama": {
+"droid": {
   "type": "acp",
   "command": "droid-acp",
   "args": [],
   "cwd": "/path/to/bridge",
-  "defaultModel": "nemotron-3-nano",
+  "defaultModel": "custom:kimi-for-coding-[Kimi]-7",
   "models": {
-    "nemotron-3-nano":    { "flag": "--model", "value": "nemotron-3-nano:latest", "provider": "ollama" },
-    "qwen3-coder-next":   { "flag": "--model", "value": "qwen3-coder-next:latest", "provider": "ollama" },
-    "qwen2.5-coder:7b":   { "flag": "--model", "value": "qwen2.5-coder:7b", "provider": "ollama" },
-    "qwen3":              { "flag": "--model", "value": "qwen3:latest", "provider": "ollama" },
-    "granite4":           { "flag": "--model", "value": "granite4:latest", "provider": "ollama" }
-  },
-  "strengths": ["offline", "privacy", "no API costs", "fast iteration"]
+    "custom:kimi-for-coding-[Kimi]-7": { "flag": "--model", "value": "custom:kimi-for-coding-[Kimi]-7", "provider": "factory" },
+    "custom:nemotron-3-nano-[Ollama]-37": { "flag": "--model", "value": "custom:nemotron-3-nano-[Ollama]-37", "provider": "factory" }
+  }
 }
 ```
 
-Set the Ollama host in your environment or `docker-compose.yml`:
+**Step 4**: Assign a task specifying the Ollama model:
 
-```bash
-export OLLAMA_HOST=http://localhost:11434    # local
-export OLLAMA_HOST=http://host.docker.internal:11434  # from Docker
+```
+> Ask droid to review cli-team-bridge using the nemotron-3-nano model
 ```
 
-Make sure the models are pulled first: `ollama pull nemotron-3-nano`
+**Tested**: nemotron-3-nano (24GB, Q4_K_M) completed a file listing task in ~10 seconds via `droid-acp` on macOS with Ollama running locally at `localhost:11434`.
 
 ### Custom models (Droid/Factory)
 

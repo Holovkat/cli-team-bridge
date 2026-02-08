@@ -26,6 +26,9 @@ interface ActiveTask {
   output?: string
   error?: string | null
   proc?: { kill: (signal?: string) => void }
+  lastUpdate?: string
+  toolCallCount?: number
+  outputLength?: number
 }
 
 const activeTasks = new Map<string, ActiveTask>()
@@ -189,7 +192,19 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
-        if (!isAgentAvailable(agentConfig)) {
+        // Fallback agent support
+        let effectiveAgent = agent
+        let effectiveAgentConfig = agentConfig
+        if (!isAgentAvailable(agentConfig) && agentConfig.fallbackAgent) {
+          const fbConfig = config.agents[agentConfig.fallbackAgent]
+          if (fbConfig && isAgentAvailable(fbConfig)) {
+            logger.info(`[MCP] Agent "${agent}" unavailable, falling back to "${agentConfig.fallbackAgent}"`)
+            effectiveAgent = agentConfig.fallbackAgent
+            effectiveAgentConfig = fbConfig
+          }
+        }
+
+        if (!isAgentAvailable(effectiveAgentConfig)) {
           return {
             content: [{ type: 'text', text: `Agent "${agent}" is not available (adapter binary not found on PATH)` }],
             isError: true,
@@ -222,6 +237,16 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
+        // Per-agent concurrency limit
+        const MAX_PER_AGENT = 3
+        const agentRunning = [...activeTasks.values()].filter(t => t.status === 'running' && t.agent === agent).length
+        if (agentRunning >= MAX_PER_AGENT) {
+          return {
+            content: [{ type: 'text', text: `Agent "${agent}" at capacity (${agentRunning}/${MAX_PER_AGENT} running). Try again later.` }],
+            isError: true,
+          }
+        }
+
         const taskId = randomUUID()
         const modelId = model ?? agentConfig.defaultModel
 
@@ -233,6 +258,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           prompt,
           status: 'running',
           startedAt: new Date().toISOString(),
+          lastUpdate: new Date().toISOString(),
+          toolCallCount: 0,
+          outputLength: 0,
         }
         activeTasks.set(taskId, task)
         taskStore.save({ id: taskId, agent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
@@ -250,6 +278,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.completedAt = new Date().toISOString()
             task.output = result.output
             task.error = result.error
+            task.lastUpdate = task.completedAt
+            task.outputLength = (result.output ?? '').length
             taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
             logger.info(`[MCP] Task ${taskId} ${task.status}`)
             pruneCompletedTasks()
@@ -302,6 +332,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               project: task.project,
               startedAt: task.startedAt,
               completedAt: task.completedAt ?? null,
+              lastUpdate: task.lastUpdate ?? null,
+              toolCallCount: task.toolCallCount ?? 0,
+              outputLength: task.outputLength ?? 0,
             }, null, 2),
           }],
         }
