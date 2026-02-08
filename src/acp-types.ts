@@ -50,3 +50,50 @@ export interface AcpSessionUpdate {
   status?: string
   entries?: unknown[]
 }
+
+// --- Cross-Agent Messaging Types (Sprint 10) ---
+
+export type MessageType = 'message' | 'request' | 'response' | 'nudge' | 'broadcast' | 'shutdown'
+
+export type AgentStatus = 'running' | 'idle' | 'waiting' | 'dead'
+
+export type RequestStatus = 'open' | 'claimed' | 'completed' | 'expired'
+
+export interface BridgeMessage {
+  id: string
+  type: MessageType
+  from: string
+  to: string | 'all'
+  content: string
+  timestamp: string
+  requestId?: string
+  claimedBy?: string
+  replyTo?: string
+  read: boolean
+}
+
+export interface TaskRequest {
+  id: string
+  from: string
+  description: string
+  context?: string
+  status: RequestStatus
+  claimedBy?: string
+  createdAt: string
+  claimedAt?: string
+  completedAt?: string
+  timeoutSeconds: number
+}
+
+export interface AgentRegistryEntry {
+  name: string
+  status: AgentStatus
+  model: string
+  currentTask?: string
+  registeredAt: string
+  lastHeartbeat: string
+  lastActivity: string
+  pid?: number
+  messagesPending: number
+  requestsPending: number
+}

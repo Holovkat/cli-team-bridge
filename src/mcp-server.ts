@@ -14,6 +14,9 @@ import { logger } from './logger'
 import { VERSION } from './version'
 import { TaskStore } from './persistence'
 import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled } from './metrics'
+import { MessageBus } from './message-bus'
+import { AgentRegistry } from './agent-registry'
+import { WorkflowEngine, type WorkflowStep } from './workflow'
 
 interface ActiveTask {
   id: string
@@ -55,6 +58,12 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
   const dbPath = join(workspaceRoot, '.bridge-tasks.db')
   const taskStore = new TaskStore(dbPath)
   taskStore.recoverOrphaned()
+
+  // Cross-agent messaging infrastructure
+  const bridgePath = join(workspaceRoot, '.claude', 'bridge')
+  const messageBus = new MessageBus(bridgePath)
+  const agentRegistry = new AgentRegistry(bridgePath)
+  const workflowEngine = new WorkflowEngine()
 
   const server = new Server(
     { name: 'cli-team-bridge', version: VERSION },
@@ -145,6 +154,96 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         name: 'get_metrics',
         description: 'Get bridge metrics including task counts, success rates, and per-agent statistics.',
         inputSchema: { type: 'object' as const, properties: {} },
+      },
+      // --- Cross-Agent Messaging Tools (Orchestrator Mode) ---
+      {
+        name: 'broadcast',
+        description: 'Send a message to all active agents.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            content: { type: 'string', description: 'Message to broadcast to all agents' },
+          },
+          required: ['content'],
+        },
+      },
+      {
+        name: 'send_agent_message',
+        description: 'Send a direct message to a specific agent.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            to: { type: 'string', description: 'Target agent name' },
+            content: { type: 'string', description: 'Message body' },
+          },
+          required: ['to', 'content'],
+        },
+      },
+      {
+        name: 'get_agent_status',
+        description: 'Get health and progress of all active agents, including pending messages and requests.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
+      {
+        name: 'shutdown_agent',
+        description: 'Send a graceful shutdown request to an agent. Agent finishes current work then exits.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            agent: { type: 'string', description: 'Agent name to shut down' },
+            reason: { type: 'string', description: 'Optional reason for shutdown' },
+          },
+          required: ['agent'],
+        },
+      },
+      {
+        name: 'kill_agent',
+        description: 'Force kill an agent. Sends SIGTERM then SIGKILL after 5s.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            agent: { type: 'string', description: 'Agent name to kill' },
+          },
+          required: ['agent'],
+        },
+      },
+      {
+        name: 'create_workflow',
+        description: 'Define a task chain where output flows between agents. Steps can run in parallel when dependencies allow.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            name: { type: 'string', description: 'Workflow name' },
+            project: { type: 'string', description: 'Project directory relative to workspace root' },
+            steps: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Step name (unique within workflow)' },
+                  agent: { type: 'string', description: 'Agent to run this step' },
+                  prompt: { type: 'string', description: 'Task prompt for this step' },
+                  model: { type: 'string', description: 'Optional model override' },
+                  depends_on: { type: 'array', items: { type: 'string' }, description: 'Step names that must complete first' },
+                },
+                required: ['name', 'agent', 'prompt'],
+              },
+              description: 'Workflow steps',
+            },
+          },
+          required: ['name', 'project', 'steps'],
+        },
+      },
+      {
+        name: 'get_workflow_status',
+        description: 'Get the status and results of a workflow.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            workflow_id: { type: 'string', description: 'Workflow ID returned by create_workflow' },
+          },
+          required: ['workflow_id'],
+        },
       },
     ],
   }))
@@ -286,7 +385,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         spawnConfig.cwd = projectPath
 
         // Run async — don't block the MCP response
-        runAcpSession(spawnConfig, prompt, modelId)
+        runAcpSession(spawnConfig, prompt, modelId, { bridgePath, agentName: effectiveAgent })
           .then((result) => {
             task.status = result.error ? 'failed' : 'completed'
             task.completedAt = new Date().toISOString()
@@ -426,6 +525,244 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_metrics': {
         return { content: [{ type: 'text', text: JSON.stringify(getMetricsSummary(), null, 2) }] }
+      }
+
+      // --- Cross-Agent Messaging Handlers ---
+
+      case 'broadcast': {
+        const { content } = args as { content: string }
+        if (!content) {
+          return { content: [{ type: 'text', text: 'Missing required field: content' }], isError: true }
+        }
+
+        const activeAgents = agentRegistry.getActive()
+        const deliveredTo: string[] = []
+        const failed: string[] = []
+
+        for (const agent of activeAgents) {
+          try {
+            messageBus.writeMessage('orchestrator', agent.name, content, { type: 'broadcast' })
+            deliveredTo.push(agent.name)
+          } catch {
+            failed.push(agent.name)
+          }
+        }
+
+        logger.info(`[MCP] Broadcast to ${deliveredTo.length} agents (${failed.length} failed)`)
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ delivered_to: deliveredTo, failed }, null, 2),
+          }],
+        }
+      }
+
+      case 'send_agent_message': {
+        const { to, content } = args as { to: string; content: string }
+        if (!to || !content) {
+          return { content: [{ type: 'text', text: 'Missing required fields: to, content' }], isError: true }
+        }
+
+        const targetAgent = agentRegistry.get(to)
+        if (!targetAgent) {
+          return { content: [{ type: 'text', text: `Agent "${to}" not found in registry` }], isError: true }
+        }
+
+        const msg = messageBus.writeMessage('orchestrator', to, content, { type: 'message' })
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ message_id: msg.id, delivered: true }, null, 2),
+          }],
+        }
+      }
+
+      case 'get_agent_status': {
+        const agents = agentRegistry.getAll()
+        const deadAgents = agentRegistry.detectDead()
+
+        if (deadAgents.length > 0) {
+          logger.warn(`[MCP] Detected ${deadAgents.length} dead agents: ${deadAgents.map(a => a.name).join(', ')}`)
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              agents: agents.map(a => ({
+                name: a.name,
+                status: a.status,
+                model: a.model,
+                task_id: a.currentTask ?? null,
+                messages_pending: messageBus.getUnreadCount(a.name),
+                requests_pending: messageBus.listOpenRequests().filter(r => r.from === a.name).length,
+                uptime_seconds: agentRegistry.getUptimeSeconds(a.name),
+                last_activity: a.lastActivity,
+                pid: a.pid ?? null,
+              })),
+            }, null, 2),
+          }],
+        }
+      }
+
+      case 'shutdown_agent': {
+        const { agent, reason } = args as { agent: string; reason?: string }
+        if (!agent) {
+          return { content: [{ type: 'text', text: 'Missing required field: agent' }], isError: true }
+        }
+
+        const entry = agentRegistry.get(agent)
+        if (!entry) {
+          return { content: [{ type: 'text', text: `Agent "${agent}" not found` }], isError: true }
+        }
+
+        // Send shutdown message
+        messageBus.writeMessage('orchestrator', agent, reason ?? 'Shutdown requested', { type: 'shutdown' })
+        logger.info(`[MCP] Shutdown request sent to agent "${agent}"`)
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ acknowledged: true, agent, message: 'Shutdown message sent' }, null, 2),
+          }],
+        }
+      }
+
+      case 'kill_agent': {
+        const { agent } = args as { agent: string }
+        if (!agent) {
+          return { content: [{ type: 'text', text: 'Missing required field: agent' }], isError: true }
+        }
+
+        const entry = agentRegistry.get(agent)
+        if (!entry || !entry.pid) {
+          return { content: [{ type: 'text', text: `Agent "${agent}" not found or no PID recorded` }], isError: true }
+        }
+
+        let killed = false
+        try {
+          process.kill(entry.pid, 'SIGTERM')
+          // Wait 5s then SIGKILL
+          setTimeout(() => {
+            try { process.kill(entry.pid!, 'SIGKILL') } catch { /* already dead */ }
+          }, 5000)
+          killed = true
+          agentRegistry.updateStatus(agent, 'dead')
+          logger.info(`[MCP] Force kill sent to agent "${agent}" (pid: ${entry.pid})`)
+        } catch {
+          agentRegistry.updateStatus(agent, 'dead')
+          logger.warn(`[MCP] Agent "${agent}" process already dead`)
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ killed, agent }, null, 2),
+          }],
+        }
+      }
+
+      case 'create_workflow': {
+        const { name: wfName, project, steps } = args as {
+          name: string
+          project: string
+          steps: Array<{ name: string; agent: string; prompt: string; model?: string; depends_on?: string[] }>
+        }
+
+        if (!wfName || !project || !steps || steps.length === 0) {
+          return { content: [{ type: 'text', text: 'Missing required fields: name, project, steps' }], isError: true }
+        }
+
+        // Validate project path
+        const projectPath = resolve(workspaceRoot, project)
+        const resolvedRoot = resolve(workspaceRoot)
+        if (!projectPath.startsWith(resolvedRoot + sep) && projectPath !== resolvedRoot) {
+          return { content: [{ type: 'text', text: `Project path escapes workspace root: ${project}` }], isError: true }
+        }
+        if (!existsSync(projectPath)) {
+          return { content: [{ type: 'text', text: `Project path does not exist: ${projectPath}` }], isError: true }
+        }
+
+        // Convert to WorkflowStep format
+        const workflowSteps: WorkflowStep[] = steps.map(s => ({
+          name: s.name,
+          agent: s.agent,
+          prompt: s.prompt,
+          model: s.model,
+          dependsOn: s.depends_on,
+        }))
+
+        try {
+          const definition = workflowEngine.createWorkflow(wfName, workflowSteps)
+
+          // Run workflow async
+          const runner = async (agent: string, prompt: string, model?: string) => {
+            const agentConfig = config.agents[agent]
+            if (!agentConfig) throw new Error(`Unknown agent: ${agent}`)
+
+            const spawnConfig = buildSpawnConfig(agent, agentConfig)
+            spawnConfig.cwd = projectPath
+            const modelId = model ?? agentConfig.defaultModel
+            const result = await runAcpSession(spawnConfig, prompt, modelId, { bridgePath, agentName: agent })
+            return {
+              taskId: randomUUID(),
+              output: result.output,
+              error: result.error,
+            }
+          }
+
+          workflowEngine.execute(definition, runner).catch(err => {
+            logger.error(`[Workflow] "${wfName}" execution error: ${err}`)
+          })
+
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                workflow_id: definition.id,
+                name: wfName,
+                steps: definition.steps.length,
+                message: `Workflow started. Use get_workflow_status("${definition.id}") to check progress.`,
+              }, null, 2),
+            }],
+          }
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Workflow creation failed: ${err}` }], isError: true }
+        }
+      }
+
+      case 'get_workflow_status': {
+        const { workflow_id } = args as { workflow_id: string }
+        if (!workflow_id) {
+          return { content: [{ type: 'text', text: 'Missing required field: workflow_id' }], isError: true }
+        }
+
+        const state = workflowEngine.getState(workflow_id)
+        if (!state) {
+          return { content: [{ type: 'text', text: `Workflow "${workflow_id}" not found` }], isError: true }
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              workflow_id: state.id,
+              name: state.name,
+              status: state.status,
+              started_at: state.startedAt ?? null,
+              completed_at: state.completedAt ?? null,
+              steps: state.steps.map(s => ({
+                name: s.stepName,
+                status: s.status,
+                task_id: s.taskId ?? null,
+                output_length: s.output?.length ?? 0,
+                error: s.error ?? null,
+                started_at: s.startedAt ?? null,
+                completed_at: s.completedAt ?? null,
+              })),
+            }, null, 2),
+          }],
+        }
       }
 
       default:

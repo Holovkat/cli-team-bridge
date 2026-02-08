@@ -148,6 +148,40 @@
 
 ---
 
+## Sprint 10: Cross-Agent Communication
+**Goal**: File-based messaging system enabling inter-agent communication, task requests, and workflow orchestration — all via MCP tools
+**Shard**: [`10-feature-cross-agent-messaging.md`](./10-feature-cross-agent-messaging.md)
+**Priority**: P1
+
+### Phase 1: Message Bus Core
+- [x] 10.1 Create message bus with file-based store (`src/message-bus.ts`)
+- [x] 10.2 Create agent registry for active agent tracking (`src/agent-registry.ts`)
+- [x] 10.3 Add message types to ACP types (`src/acp-types.ts`)
+
+### Phase 2: Agent Mode MCP Tools
+- [x] 10.4 Create agentmode MCP server (`src/mcp-agentmode.ts`)
+- [x] 10.5 Wire agentmode MCP into ACP session spawn (`src/acp-client.ts`)
+- [x] 10.6 Implement `wait_for_message` with timeout and cancellation
+
+### Phase 3: Orchestrator Enhancements
+- [x] 10.7 Add messaging tools to orchestrator MCP (`src/mcp-server.ts`)
+- [x] 10.8 Implement workflow engine for task chaining (`src/workflow.ts`)
+- [x] 10.9 Add context injection — prepend unread messages to agent prompts
+
+### Phase 4: Lifecycle Management
+- [x] 10.10 Agent heartbeat and dead agent detection
+- [x] 10.11 Graceful shutdown and force kill flows
+- [x] 10.12 Cleanup on bridge shutdown — kill all agents, clean up files
+
+### Phase 5: Testing
+- [x] 10.13 Unit tests for message bus and agent registry
+- [ ] 10.14 Integration test: two agents exchange messages
+- [ ] 10.15 Integration test: request/claim/respond flow
+- [ ] 10.16 Integration test: workflow execution
+- [ ] 10.17 End-to-end test: orchestrator + 3 agents with full messaging
+
+---
+
 ## Progress Tracker
 
 | Sprint | Shard | Tasks | Done | Status |
@@ -161,7 +195,8 @@
 | 7 | Production Resilience | 5 | 5 | **Complete** |
 | 8 | Testing | 9 | 9 | **Complete** |
 | 9 | Production P2 | 7 | 7 | **Complete** |
-| **Total** | | **52** | **52** | **All Complete** |
+| 10 | Cross-Agent Messaging | 17 | 13 | **In Progress** |
+| **Total** | | **69** | **65** | **Sprint 10 Testing** |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

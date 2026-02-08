@@ -11,6 +11,8 @@ import { buildSpawnConfig } from './agent-adapters'
 import { startMcpServer } from './mcp-server'
 import { VERSION } from './version'
 import { withRetry } from './retry'
+import { MessageBus } from './message-bus'
+import { AgentRegistry } from './agent-registry'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -43,6 +45,11 @@ console.error(`
 console.error(`Mode: ${mode}`)
 console.error(`Workspace: ${config.workspaceRoot}`)
 console.error(`Config: ${values.config}`)
+
+// Bridge-level messaging infrastructure for shutdown cleanup
+const bridgePath = join(config.workspaceRoot, '.claude', 'bridge')
+const bridgeRegistry = new AgentRegistry(bridgePath)
+const bridgeMessageBus = new MessageBus(bridgePath)
 
 // --- MCP Server Mode ---
 if (mode === 'mcp' || mode === 'both') {
@@ -143,7 +150,31 @@ if (mode === 'watcher' || mode === 'both') {
   const shutdown = () => {
     logger.info('Shutting down...')
     watcher.stop()
-    process.exit(0)
+
+    // Graceful agent cleanup — broadcast shutdown, then kill remaining
+    const activeAgents = bridgeRegistry.getActive()
+    if (activeAgents.length > 0) {
+      logger.info(`Sending shutdown to ${activeAgents.length} active agents...`)
+      for (const agent of activeAgents) {
+        bridgeMessageBus.writeMessage('orchestrator', agent.name, 'Bridge shutting down', { type: 'shutdown' })
+        if (agent.pid) {
+          try { process.kill(agent.pid, 'SIGTERM') } catch { /* already dead */ }
+        }
+      }
+      // Force kill after 5s
+      setTimeout(() => {
+        for (const agent of activeAgents) {
+          if (agent.pid) {
+            try { process.kill(agent.pid, 'SIGKILL') } catch { /* already dead */ }
+          }
+        }
+        bridgeRegistry.clear()
+        bridgeMessageBus.cleanupAll()
+        process.exit(0)
+      }, 5000)
+    } else {
+      process.exit(0)
+    }
   }
 
   process.on('SIGINT', shutdown)
@@ -185,4 +216,20 @@ if (mode === 'watcher' || mode === 'both') {
 // Keep process alive in MCP-only mode
 if (mode === 'mcp') {
   console.error('[MCP] Waiting for requests on stdin...')
+
+  const mcpShutdown = () => {
+    logger.info('MCP shutting down...')
+    const activeAgents = bridgeRegistry.getActive()
+    for (const agent of activeAgents) {
+      if (agent.pid) {
+        try { process.kill(agent.pid, 'SIGTERM') } catch { /* already dead */ }
+      }
+    }
+    bridgeRegistry.clear()
+    bridgeMessageBus.cleanupAll()
+    process.exit(0)
+  }
+
+  process.on('SIGINT', mcpShutdown)
+  process.on('SIGTERM', mcpShutdown)
 }

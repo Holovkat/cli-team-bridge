@@ -9,6 +9,8 @@ import {
 } from '@agentclientprotocol/sdk'
 import { logger } from './logger'
 import { VERSION } from './version'
+import { AgentRegistry } from './agent-registry'
+import { MessageBus } from './message-bus'
 
 export interface AcpSpawnConfig {
   command: string
@@ -104,10 +106,16 @@ function nodeToWebReadable(nodeStream: Readable): ReadableStream<Uint8Array> {
  * 3. Create ClientSideConnection with Client callbacks
  * 4. initialize → newSession → prompt → collect output
  */
+export interface AcpSessionOptions {
+  bridgePath?: string
+  agentName?: string
+}
+
 export async function runAcpSession(
   config: AcpSpawnConfig,
   prompt: string,
   modelId?: string,
+  options?: AcpSessionOptions,
 ): Promise<AcpResult> {
   let output = ''
   let stderr = ''
@@ -293,12 +301,31 @@ export async function runAcpSession(
       }
     }
 
-    // 8. Send prompt and wait for completion — race against process lifecycle
+    // 8. Register agent and inject context from pending messages
+    let finalPrompt = prompt
+    if (options?.bridgePath && options?.agentName) {
+      const reg = new AgentRegistry(options.bridgePath)
+      const bus = new MessageBus(options.bridgePath)
+      reg.register(options.agentName, modelId ?? 'unknown', proc.pid ?? undefined)
+
+      // Context injection: prepend unread messages to prompt
+      const unread = bus.getUnreadMessages(options.agentName)
+      if (unread.length > 0) {
+        const msgLines = unread.map(m =>
+          `[${m.from} → ${m.to === 'all' ? 'all' : 'you'}] ${m.content}`
+        ).join('\n')
+        finalPrompt = `--- Messages from other agents ---\n${msgLines}\n--- End messages ---\n\n${prompt}`
+        bus.markAllRead(options.agentName)
+        logger.info(`[ACP] Injected ${unread.length} messages into prompt for ${options.agentName}`)
+      }
+    }
+
+    // 9. Send prompt and wait for completion — race against process lifecycle
     logger.info('Sending ACP prompt...')
     const result = await Promise.race([
       connection.prompt({
         sessionId,
-        prompt: [{ type: 'text', text: prompt }],
+        prompt: [{ type: 'text', text: finalPrompt }],
       } as any),
       processExited,
     ])
@@ -309,6 +336,11 @@ export async function runAcpSession(
     clearTimeout(timeoutHandle)
     if (sigkillTimer) clearTimeout(sigkillTimer)
 
+    // Deregister agent on completion
+    if (options?.bridgePath && options?.agentName) {
+      new AgentRegistry(options.bridgePath).deregister(options.agentName)
+    }
+
     // Kill the process gracefully
     safeKill(proc)
 
@@ -316,6 +348,12 @@ export async function runAcpSession(
   } catch (err) {
     clearTimeout(timeoutHandle)
     if (sigkillTimer) clearTimeout(sigkillTimer)
+
+    // Deregister agent on error
+    if (options?.bridgePath && options?.agentName) {
+      new AgentRegistry(options.bridgePath).deregister(options.agentName)
+    }
+
     safeKill(proc)
 
     const errStr = err instanceof Error ? err.message : JSON.stringify(err, null, 2)
