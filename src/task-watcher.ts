@@ -82,8 +82,8 @@ export class TaskWatcher extends EventEmitter {
 
           logger.info(`Task ${task.id} assigned to ${task.owner}: "${task.subject}"`)
           this.emit('task-assigned', assignment)
-        } catch {
-          // Skip unparseable files
+        } catch (err) {
+          logger.debug(`Skipping unparseable task file ${file}: ${err}`)
         }
       }
     } catch (err) {

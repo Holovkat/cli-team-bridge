@@ -70,12 +70,12 @@
 **Priority**: P1
 
 ### Tasks
-- [ ] 5.1 Fix lock manager error masking (`lock-manager.ts`)
-- [ ] 5.2 Log errors in task watcher instead of swallowing (`task-watcher.ts`)
-- [ ] 5.3 Propagate errors from result writer (`result-writer.ts`)
-- [ ] 5.4 Fix async EventEmitter handler (`index.ts`)
-- [ ] 5.5 Fix stream listener cleanup (`acp-client.ts`)
-- [ ] 5.6 Cap agent output in memory (`acp-client.ts`)
+- [x] 5.1 Fix lock manager error masking (`lock-manager.ts`)
+- [x] 5.2 Log errors in task watcher instead of swallowing (`task-watcher.ts`)
+- [x] 5.3 Propagate errors from result writer (`result-writer.ts`)
+- [x] 5.4 Fix async EventEmitter handler (`index.ts`)
+- [x] 5.5 Fix stream listener cleanup (`acp-client.ts`)
+- [x] 5.6 Cap agent output in memory (`acp-client.ts`)
 
 ---
 
@@ -156,12 +156,12 @@
 | 2 | Security High | 4 | 4 | **Complete** |
 | 3 | Security Med/Low | 6 | 6 | **Complete** |
 | 4 | Typing & Validation | 4 | 4 | **Complete** |
-| 5 | Error Handling | 6 | 0 | Pending |
+| 5 | Error Handling | 6 | 6 | **Complete** |
 | 6 | Cleanup | 8 | 0 | Pending |
 | 7 | Production Resilience | 5 | 0 | Pending |
 | 8 | Testing | 9 | 0 | Pending |
 | 9 | Production P2 | 7 | 0 | Pending |
-| **Total** | | **52** | **17** | |
+| **Total** | | **52** | **23** | |
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

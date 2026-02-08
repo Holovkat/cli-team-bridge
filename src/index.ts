@@ -67,7 +67,7 @@ if (mode === 'watcher' || mode === 'both') {
 
   const watcher = new TaskWatcher(config, taskDir)
 
-  watcher.on('task-assigned', async (assignment: TaskAssignment) => {
+  async function handleTaskAssignment(assignment: TaskAssignment, config: BridgeConfig, watcher: TaskWatcher): Promise<void> {
     const { task, filePath, modelOverride } = assignment
     const agentConfig = config.agents[task.owner]
 
@@ -78,7 +78,10 @@ if (mode === 'watcher' || mode === 'both') {
     }
 
     try {
-      await markTaskInProgress(filePath, taskDir)
+      const marked = await markTaskInProgress(filePath, taskDir)
+      if (!marked) {
+        logger.warn(`Failed to mark task ${task.id} as in_progress`)
+      }
 
       const spawnConfig = buildSpawnConfig(task.owner, agentConfig)
       const model = modelOverride ?? agentConfig.defaultModel
@@ -99,7 +102,10 @@ if (mode === 'watcher' || mode === 'both') {
         error: acpResult.error,
       }
 
-      await writeTaskResult(filePath, result, taskDir)
+      const written = await writeTaskResult(filePath, result, taskDir)
+      if (!written) {
+        logger.warn(`Failed to write result for task ${task.id}`)
+      }
     } catch (err) {
       logger.error(`Task ${task.id} failed: ${err}`)
       const result: TaskResult = {
@@ -111,10 +117,19 @@ if (mode === 'watcher' || mode === 'both') {
         output: '',
         error: String(err),
       }
-      await writeTaskResult(filePath, result, taskDir)
+      const written = await writeTaskResult(filePath, result, taskDir)
+      if (!written) {
+        logger.warn(`Failed to write result for task ${task.id}`)
+      }
     } finally {
       watcher.markComplete(task.id)
     }
+  }
+
+  watcher.on('task-assigned', (assignment: TaskAssignment) => {
+    handleTaskAssignment(assignment, config, watcher).catch((err) => {
+      logger.error(`Unhandled error in task handler: ${err}`)
+    })
   })
 
   watcher.start()

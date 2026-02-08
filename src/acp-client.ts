@@ -33,6 +33,7 @@ export interface ToolCallInfo {
 const TASK_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 const INIT_TIMEOUT_MS = 30 * 1000 // 30 seconds for initialize/newSession
 const MAX_STDERR_BYTES = 64 * 1024 // 64KB cap on stderr buffer
+const MAX_OUTPUT_BYTES = 1024 * 1024 // 1MB cap on agent output buffer
 
 /** Safely kill a process — no-op if already dead */
 function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
@@ -71,13 +72,24 @@ function nodeToWebWritable(nodeStream: Writable): WritableStream<Uint8Array> {
 }
 
 function nodeToWebReadable(nodeStream: Readable): ReadableStream<Uint8Array> {
+  let onData: ((chunk: Buffer) => void) | null = null
+  let onEnd: (() => void) | null = null
+  let onError: ((err: Error) => void) | null = null
+
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      nodeStream.on('data', (chunk: Buffer) => {
-        controller.enqueue(new Uint8Array(chunk))
-      })
-      nodeStream.on('end', () => controller.close())
-      nodeStream.on('error', (err) => controller.error(err))
+      onData = (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk))
+      onEnd = () => controller.close()
+      onError = (err) => controller.error(err)
+      nodeStream.on('data', onData)
+      nodeStream.on('end', onEnd)
+      nodeStream.on('error', onError)
+    },
+    cancel() {
+      if (onData) nodeStream.off('data', onData)
+      if (onEnd) nodeStream.off('end', onEnd)
+      if (onError) nodeStream.off('error', onError)
+      nodeStream.destroy()
     },
   })
 }
@@ -197,7 +209,9 @@ export async function runAcpSession(
           switch (update.sessionUpdate) {
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
-                output += update.content.text
+                if (output.length < MAX_OUTPUT_BYTES) {
+                  output += update.content.text.slice(0, MAX_OUTPUT_BYTES - output.length)
+                }
               }
               break
             case 'agent_thought_chunk':

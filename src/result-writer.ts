@@ -19,7 +19,7 @@ export async function writeTaskResult(
   filePath: string,
   result: TaskResult,
   taskDir: string,
-): Promise<void> {
+): Promise<boolean> {
   const lock = new LockManager(taskDir)
 
   try {
@@ -53,14 +53,16 @@ export async function writeTaskResult(
     renameSync(tmpPath, filePath)
 
     logger.info(`Result written for task ${task.id}: ${result.status}`)
+    return true
   } catch (err) {
     logger.error(`Failed to write result for ${filePath}: ${err}`)
+    return false
   } finally {
     lock.release()
   }
 }
 
-export async function markTaskInProgress(filePath: string, taskDir: string): Promise<void> {
+export async function markTaskInProgress(filePath: string, taskDir: string): Promise<boolean> {
   const lock = new LockManager(taskDir)
 
   try {
@@ -80,8 +82,10 @@ export async function markTaskInProgress(filePath: string, taskDir: string): Pro
     const tmpPath = filePath + '.tmp'
     await Bun.write(tmpPath, JSON.stringify(task, null, 2))
     renameSync(tmpPath, filePath)
+    return true
   } catch (err) {
     logger.error(`Failed to mark in_progress: ${err}`)
+    return false
   } finally {
     lock.release()
   }
