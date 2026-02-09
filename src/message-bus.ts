@@ -57,44 +57,81 @@ export class MessageBus {
       read: false,
     }
 
-    if (to === 'all') {
-      // Broadcast: write to every agent's inbox
-      this.writeToAllInboxes(msg, from)
-    } else {
-      this.writeToInbox(to, msg)
+    try {
+      if (to === 'all') {
+        // Broadcast: write to every agent's inbox
+        this.writeToAllInboxes(msg, from)
+      } else {
+        this.writeToInbox(to, msg)
+      }
+      logger.debug(`[MessageBus] ${from} → ${to}: ${msg.type} (${msg.id})`)
+    } catch (err) {
+      logger.error(`[MessageBus] Failed to write message from ${from} to ${to}: ${err}`)
+      // Re-throw to ensure callers know the message was not delivered
+      throw new Error(`Message delivery failed: ${err}`)
     }
 
-    logger.debug(`[MessageBus] ${from} → ${to}: ${msg.type} (${msg.id})`)
     return msg
   }
 
   private writeToInbox(agentName: string, msg: BridgeMessage): void {
     const inboxDir = this.agentInboxDir(agentName)
-    const files = readdirSync(inboxDir).filter(f => f.endsWith('.json'))
+    
+    try {
+      const files = readdirSync(inboxDir).filter(f => f.endsWith('.json'))
 
-    // Prune oldest if inbox is full
-    if (files.length >= MAX_MESSAGES_PER_INBOX) {
-      const sorted = files.sort()
-      const toRemove = sorted.slice(0, files.length - MAX_MESSAGES_PER_INBOX + 1)
-      for (const f of toRemove) {
-        try { unlinkSync(join(inboxDir, f)) } catch { /* ignore */ }
+      // Prune oldest if inbox is full
+      if (files.length >= MAX_MESSAGES_PER_INBOX) {
+        const sorted = files.sort()
+        const toRemove = sorted.slice(0, files.length - MAX_MESSAGES_PER_INBOX + 1)
+        for (const f of toRemove) {
+          try { 
+            unlinkSync(join(inboxDir, f)) 
+          } catch (err) {
+            logger.warn(`[MessageBus] Failed to prune message ${f}: ${err}`)
+          }
+        }
+        logger.warn(`[MessageBus] Pruned ${toRemove.length} messages from ${agentName} inbox`)
       }
-      logger.warn(`[MessageBus] Pruned ${toRemove.length} messages from ${agentName} inbox`)
-    }
 
-    // Filename: timestamp-uuid.json for natural ordering
-    const filename = `${msg.timestamp.replace(/[:.]/g, '-')}-${msg.id.slice(0, 8)}.json`
-    writeFileSync(join(inboxDir, filename), JSON.stringify(msg, null, 2))
+      // Filename: timestamp-uuid.json for natural ordering
+      const filename = `${msg.timestamp.replace(/[:.]/g, '-')}-${msg.id.slice(0, 8)}.json`
+      const filePath = join(inboxDir, filename)
+      writeFileSync(filePath, JSON.stringify(msg, null, 2))
+    } catch (err) {
+      logger.error(`[MessageBus] Failed to write to inbox for ${agentName}: ${err}`)
+      throw err
+    }
   }
 
   private writeToAllInboxes(msg: BridgeMessage, excludeSender: string): void {
-    if (!existsSync(this.messagesDir)) return
-    const agents = readdirSync(this.messagesDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && d.name !== excludeSender)
-      .map(d => d.name)
+    if (!existsSync(this.messagesDir)) {
+      throw new Error(`Messages directory does not exist: ${this.messagesDir}`)
+    }
+    
+    let agents: string[]
+    try {
+      agents = readdirSync(this.messagesDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && d.name !== excludeSender)
+        .map(d => d.name)
+    } catch (err) {
+      logger.error(`[MessageBus] Failed to list agent inboxes: ${err}`)
+      throw err
+    }
 
+    const errors: Error[] = []
     for (const agent of agents) {
-      this.writeToInbox(agent, { ...msg, to: agent })
+      try {
+        this.writeToInbox(agent, { ...msg, to: agent })
+      } catch (err) {
+        logger.error(`[MessageBus] Failed to write to inbox for ${agent}: ${err}`)
+        errors.push(err as Error)
+      }
+    }
+    
+    // If any writes failed, report the failure
+    if (errors.length > 0) {
+      throw new Error(`Broadcast failed for ${errors.length} of ${agents.length} agents`)
     }
   }
 
@@ -114,6 +151,7 @@ export class MessageBus {
         messages.push(msg)
       } catch (err) {
         logger.warn(`[MessageBus] Failed to read message file ${file}: ${err}`)
+        // Continue processing other messages - don't let one corrupt file break the entire inbox
       }
     }
     return messages
@@ -135,7 +173,10 @@ export class MessageBus {
           writeFileSync(filePath, JSON.stringify(msg, null, 2))
           count++
         }
-      } catch { /* skip corrupted files */ }
+      } catch (err) {
+        logger.warn(`[MessageBus] Failed to mark message ${file} as read: ${err}`)
+        // Continue processing other messages
+      }
     }
     return count
   }
@@ -212,6 +253,7 @@ export class MessageBus {
         return { claimed: true, request: req }
       } catch (err) {
         logger.warn(`[MessageBus] Failed to read request file ${file}: ${err}`)
+        // Continue processing other requests
       }
     }
 
@@ -226,7 +268,10 @@ export class MessageBus {
         const raw = readFileSync(join(this.requestsDir, file), 'utf-8')
         const req: TaskRequest = JSON.parse(raw)
         if (req.id === requestId) return req
-      } catch { /* skip */ }
+      } catch (err) {
+        logger.warn(`[MessageBus] Failed to read request file ${file}: ${err}`)
+        // Continue processing other requests
+      }
     }
     return null
   }
@@ -250,7 +295,10 @@ export class MessageBus {
           }
           requests.push(req)
         }
-      } catch { /* skip */ }
+      } catch (err) {
+        logger.warn(`[MessageBus] Failed to list open request from ${file}: ${err}`)
+        // Continue processing other requests
+      }
     }
     return requests
   }
@@ -269,7 +317,11 @@ export class MessageBus {
     try {
       const files = readdirSync(inboxDir)
       for (const f of files) {
-        try { unlinkSync(join(inboxDir, f)) } catch { /* ignore */ }
+        try { 
+          unlinkSync(join(inboxDir, f)) 
+        } catch (err) {
+          logger.warn(`[MessageBus] Failed to delete message ${f} during cleanup: ${err}`)
+        }
       }
       logger.info(`[MessageBus] Cleaned up inbox for ${agentName}`)
     } catch (err) {
@@ -292,7 +344,11 @@ export class MessageBus {
     if (existsSync(this.requestsDir)) {
       const files = readdirSync(this.requestsDir)
       for (const f of files) {
-        try { unlinkSync(join(this.requestsDir, f)) } catch { /* ignore */ }
+        try { 
+          unlinkSync(join(this.requestsDir, f)) 
+        } catch (err) {
+          logger.warn(`[MessageBus] Failed to delete request ${f} during cleanup: ${err}`)
+        }
       }
     }
     logger.info('[MessageBus] Full cleanup complete')

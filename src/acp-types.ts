@@ -49,6 +49,19 @@ export interface AcpSessionUpdate {
   title?: string
   status?: string
   entries?: unknown[]
+  rawOutput?: string | unknown
+}
+
+export interface AcpPermissionResponse {
+  outcome: {
+    outcome: string
+    optionId: string
+  }
+}
+
+export interface AcpSetSessionModelParams {
+  sessionId: string
+  modelId: string
 }
 
 // --- Cross-Agent Messaging Types (Sprint 10) ---

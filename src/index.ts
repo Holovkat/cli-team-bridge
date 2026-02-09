@@ -139,10 +139,15 @@ if (mode === 'watcher' || mode === 'both') {
     }
   }
 
-  watcher.on('task-assigned', (assignment: TaskAssignment) => {
-    handleTaskAssignment(assignment, config, watcher).catch((err) => {
-      logger.error(`Unhandled error in task handler: ${err}`)
-    })
+  watcher.on('task-assigned', async (assignment: TaskAssignment) => {
+    try {
+      await handleTaskAssignment(assignment, config, watcher)
+    } catch (err) {
+      logger.error(`Unhandled error in task handler for ${assignment.task.id}: ${err}`)
+    } finally {
+      // Ensure processing set is always cleaned up, even on unexpected errors
+      watcher.markComplete(assignment.task.id)
+    }
   })
 
   watcher.start()

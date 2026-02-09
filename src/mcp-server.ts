@@ -54,6 +54,44 @@ function pruneCompletedTasks() {
   }
 }
 
+interface PersistedTask {
+  id: string
+  agent: string
+  model: string
+  project: string
+  prompt: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  startedAt: string
+  completedAt?: string
+  output?: string
+  error?: string | null
+}
+
+/**
+ * Retrieve a task from active tasks or persistent storage.
+ * Converts persisted task format to ActiveTask format.
+ */
+function getTaskFromStore(taskId: string, taskStore: TaskStore): ActiveTask | undefined {
+  const activeTask = activeTasks.get(taskId)
+  if (activeTask) return activeTask
+
+  const persisted = taskStore.get(taskId) as PersistedTask | undefined
+  if (!persisted) return undefined
+
+  return {
+    id: persisted.id,
+    agent: persisted.agent,
+    model: persisted.model,
+    project: persisted.project,
+    prompt: persisted.prompt,
+    status: persisted.status,
+    startedAt: persisted.startedAt,
+    completedAt: persisted.completedAt,
+    output: persisted.output,
+    error: persisted.error,
+  }
+}
+
 export async function startMcpServer(config: BridgeConfig, workspaceRoot: string) {
   const dbPath = join(workspaceRoot, '.bridge-tasks.db')
   const taskStore = new TaskStore(dbPath)

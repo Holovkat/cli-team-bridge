@@ -11,6 +11,19 @@ import { logger } from './logger'
 import { VERSION } from './version'
 import { AgentRegistry } from './agent-registry'
 import { MessageBus } from './message-bus'
+import type {
+  AcpInitializeParams,
+  AcpInitializeResult,
+  AcpNewSessionParams,
+  AcpNewSessionResult,
+  AcpPromptParams,
+  AcpPromptResult,
+  AcpPermissionRequest,
+  AcpPermissionOption,
+  AcpPermissionResponse,
+  AcpSessionUpdate,
+  AcpSetSessionModelParams,
+} from './acp-types'
 
 export interface AcpSpawnConfig {
   command: string
@@ -168,8 +181,22 @@ export async function runAcpSession(
   /** Tool titles that indicate file-read operations (output is not useful to return) */
   const READ_TOOL_PATTERNS = /\b(read|cat|view|open|load)\b.*\b(file|content|source)\b/i
 
+  interface ToolContentItem {
+    type: string
+    content?: Array<{ type: string; text?: string }> | string
+    uri?: string
+    diff?: string
+    output?: string
+  }
+
+  interface ToolCallUpdate {
+    title?: string
+    content?: ToolContentItem[]
+    rawOutput?: string | unknown
+  }
+
   /** Extract text content from tool_call and tool_call_update events */
-  function extractToolContent(update: any) {
+  function extractToolContent(update: ToolCallUpdate) {
     // Skip raw file-read tool output — it's not useful for orchestrator
     const title = update.title ?? ''
     if (READ_TOOL_PATTERNS.test(title)) {
@@ -257,17 +284,17 @@ export async function runAcpSession(
 
   try {
     // 3. Create NDJSON stream from child process stdin/stdout
-    // Cast to any to bridge Node.js/Web stream type differences (same as Zed adapters)
+    // Bridge Node.js/Web stream type differences (same as Zed adapters)
     const stream = ndJsonStream(
-      nodeToWebWritable(proc.stdin as Writable) as any,
-      nodeToWebReadable(proc.stdout as Readable) as any,
+      nodeToWebWritable(proc.stdin as Writable) as WritableStream<Uint8Array>,
+      nodeToWebReadable(proc.stdout as Readable) as ReadableStream<Uint8Array>,
     )
 
     // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
         // Permission controls: deny destructive operations, prefer allow_once
-        requestPermission: async (params) => {
+        requestPermission: async (params: AcpPermissionRequest): Promise<AcpPermissionResponse> => {
           const toolTitle = params.toolCall?.title ?? 'unknown'
 
           // Deny destructive operations
@@ -278,26 +305,26 @@ export async function runAcpSession(
           const description = JSON.stringify(params)
           if (DENIED_PATTERNS.some(p => p.test(description))) {
             logger.warn(`Permission DENIED (destructive): ${toolTitle}`)
-            const denyOption = params.options?.find((o: any) => o.kind === 'deny')
+            const denyOption = params.options?.find((o: AcpPermissionOption) => o.kind === 'deny')
             return {
               outcome: { outcome: 'selected', optionId: denyOption?.optionId ?? 'deny' },
-            } as any
+            }
           }
 
           // Prefer allow_once over allow_always to limit blast radius
-          const allowOnce = params.options?.find((o: any) => o.kind === 'allow_once')
-          const allowAlways = params.options?.find((o: any) => o.kind === 'allow_always')
+          const allowOnce = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_once')
+          const allowAlways = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_always')
           const selected = allowOnce ?? allowAlways
 
           logger.info(`Permission GRANTED (${selected?.kind ?? 'fallback'}): ${toolTitle}`)
           return {
             outcome: { outcome: 'selected', optionId: selected?.optionId ?? 'allow' },
-          } as any
+          }
         },
 
         // Collect streamed output from the agent
-        sessionUpdate: async (notification) => {
-          const update = notification.update as any
+        sessionUpdate: async (notification: { update: AcpSessionUpdate }) => {
+          const update = notification.update
           switch (update.sessionUpdate) {
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
@@ -337,54 +364,57 @@ export async function runAcpSession(
     // 5. Initialize — negotiate protocol version and capabilities
     //    Race against process lifecycle + 30s timeout
     logger.info('Sending ACP initialize...')
+    const initParams: AcpInitializeParams = {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+      clientInfo: { name: 'cli-team-bridge', version: VERSION },
+    }
     const initResult = await Promise.race([
       withTimeout(
-        connection.initialize({
-          protocolVersion: 1,
-          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-          clientInfo: { name: 'cli-team-bridge', version: VERSION },
-        } as any),
+        connection.initialize(initParams as unknown as Parameters<typeof connection.initialize>[0]),
         INIT_TIMEOUT_MS,
         'ACP initialize',
       ),
       processExited,
-    ])
+    ]) as AcpInitializeResult
 
-    logger.info(`ACP initialized: ${(initResult as any).agentInfo?.name ?? 'unknown'} v${(initResult as any).agentInfo?.version ?? '?'}`)
+    logger.info(`ACP initialized: ${initResult.agentInfo?.name ?? 'unknown'} v${initResult.agentInfo?.version ?? '?'}`)
 
     // 6. Create new session — race against process lifecycle + 30s timeout
     logger.info('Creating ACP session...')
+    const newSessionParams: AcpNewSessionParams = {
+      cwd: config.cwd,
+      mcpServers: [],
+    }
     const session = await Promise.race([
       withTimeout(
-        connection.newSession({
-          cwd: config.cwd,
-          mcpServers: [],
-        } as any),
+        connection.newSession(newSessionParams as unknown as Parameters<typeof connection.newSession>[0]),
         INIT_TIMEOUT_MS,
         'ACP newSession',
       ),
       processExited,
-    ])
+    ]) as AcpNewSessionResult
 
-    const sessionId = (session as any).sessionId
+    const sessionId = session.sessionId
     logger.info(`ACP session created: ${sessionId}`)
 
     // 7. Set model if requested and available
-    if (modelId && (session as any).models?.availableModels) {
-      const available = (session as any).models.availableModels as any[]
-      const match = available.find((m: any) => m.modelId === modelId || m.name === modelId)
+    if (modelId && session.models?.availableModels) {
+      const available = session.models.availableModels
+      const match = available.find((m) => m.modelId === modelId || m.name === modelId)
       if (match) {
         try {
-          await (connection as any).unstable_setSessionModel?.({
+          const setModelParams: AcpSetSessionModelParams = {
             sessionId,
             modelId: match.modelId,
-          })
+          }
+          await connection.unstable_setSessionModel?.(setModelParams as unknown as Parameters<typeof connection.unstable_setSessionModel>[0])
           logger.info(`Model set to: ${match.modelId}`)
         } catch (err) {
           logger.warn(`Failed to set model ${modelId}: ${err}`)
         }
       } else {
-        logger.warn(`Model "${modelId}" not available. Available: ${available.map((m: any) => m.modelId).join(', ')}`)
+        logger.warn(`Model "${modelId}" not available. Available: ${available.map((m) => m.modelId).join(', ')}`)
       }
     }
 
@@ -409,15 +439,16 @@ export async function runAcpSession(
 
     // 9. Send prompt and wait for completion — race against process lifecycle
     logger.info('Sending ACP prompt...')
+    const promptParams: AcpPromptParams = {
+      sessionId,
+      prompt: [{ type: 'text', text: finalPrompt }],
+    }
     const result = await Promise.race([
-      connection.prompt({
-        sessionId,
-        prompt: [{ type: 'text', text: finalPrompt }],
-      } as any),
+      connection.prompt(promptParams as unknown as Parameters<typeof connection.prompt>[0]),
       processExited,
-    ])
+    ]) as AcpPromptResult
 
-    const stopReason = (result as any).stopReason ?? null
+    const stopReason = result.stopReason ?? null
     logger.info(`ACP prompt completed: stopReason=${stopReason}`)
 
     clearTimeout(timeoutHandle)

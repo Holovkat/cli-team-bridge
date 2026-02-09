@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, fsyncSync, openSync, closeSync } from 'fs'
 import { logger } from './logger'
 import type { AgentRegistryEntry, AgentStatus } from './acp-types'
 
@@ -34,7 +34,28 @@ export class AgentRegistry {
   }
 
   private save(entries: AgentRegistryEntry[]): void {
-    writeFileSync(this.registryPath, JSON.stringify(entries, null, 2))
+    try {
+      // Atomic write: write to temp file, fsync, then rename
+      const tempPath = `${this.registryPath}.tmp`
+      const data = JSON.stringify(entries, null, 2)
+      
+      writeFileSync(tempPath, data)
+      
+      // Ensure data is flushed to disk before renaming
+      const fd = openSync(tempPath, 'r+')
+      try {
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+      
+      // Atomic rename
+      renameSync(tempPath, this.registryPath)
+    } catch (err) {
+      logger.error(`[AgentRegistry] Failed to save registry: ${err}`)
+      // Don't throw - registry corruption is worse than stale data
+      // The next operation will retry with the in-memory state
+    }
   }
 
   register(name: string, model: string, pid?: number): AgentRegistryEntry {
