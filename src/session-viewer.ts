@@ -32,15 +32,6 @@ function tmuxSessionExists(): boolean {
   }
 }
 
-/** Count panes in the tmux session */
-function tmuxPaneCount(): number {
-  try {
-    const out = execFileSync('tmux', ['list-panes', '-t', TMUX_SESSION], { encoding: 'utf8' })
-    return out.trim().split('\n').length
-  } catch {
-    return 0
-  }
-}
 
 /** Create the tmux session and open Ghostty (called once via mutex) */
 function doOpenGhosttyWithTmux(): Promise<void> {

@@ -866,9 +866,17 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             const spawnConfig = buildSpawnConfig(agent, agentConfig)
             spawnConfig.cwd = projectPath
             const modelId = model ?? agentConfig.defaultModel
-            const result = await runAcpSession(spawnConfig, prompt, modelId, { bridgePath, agentName: agent })
+            const taskId = randomUUID()
+            const showViewer = config.viewer?.enabled ?? false
+            const result = await runAcpSession(spawnConfig, prompt, modelId, {
+              bridgePath,
+              agentName: agent,
+              taskId,
+              project: projectPath,
+              showViewer,
+            })
             return {
-              taskId: randomUUID(),
+              taskId,
               output: result.output,
               error: result.error,
             }

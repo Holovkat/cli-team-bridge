@@ -122,7 +122,12 @@ if (mode === 'watcher' || mode === 'both') {
       const startedAt = new Date().toISOString()
 
       const acpResult = await withRetry(
-        () => runAcpSession(spawnConfig, task.description, model),
+        () => runAcpSession(spawnConfig, task.description, model, {
+          taskId: task.id,
+          agentName: task.owner,
+          project: config.workspaceRoot,
+          showViewer: config.viewer?.enabled ?? false,
+        }),
         { maxRetries: 2, baseDelayMs: 5000, maxDelayMs: 30000 },
         `task-${task.id}`,
       )
