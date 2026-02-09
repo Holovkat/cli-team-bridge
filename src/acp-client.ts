@@ -247,7 +247,7 @@ export async function runAcpSession(
       project: options.project ?? config.cwd,
       prompt,
     })
-    viewer.open()
+    await viewer.open()
   }
 
   logger.info(`Spawning ACP adapter: ${config.command} ${config.args.join(' ')}`)
