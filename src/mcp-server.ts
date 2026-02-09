@@ -421,7 +421,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         recordTaskAssigned(effectiveAgent)
         taskStore.save({ id: taskId, agent: effectiveAgent, model: modelId, project, prompt, status: 'running', startedAt: task.startedAt })
 
-        logger.info(`[MCP] Task ${taskId}: ${effectiveAgent}/${modelId} on ${project} — "${prompt.slice(0, 80)}"`)
+        logger.info(`[MCP] ━━━ ASSIGN TASK ━━━ ${effectiveAgent}/${modelId} on ${project}`)
+        logger.info(`[MCP]   Task: ${taskId.slice(0, 8)}  Prompt: "${prompt.slice(0, 100)}"`)
 
         // Build spawn config with project-specific cwd
         const spawnConfig = buildSpawnConfig(effectiveAgent, effectiveAgentConfig)
@@ -447,7 +448,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             operationalMetrics.increment('taskFailed')
           }
           taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
-          logger.info(`[MCP] Task ${taskId} ${task.status}`)
+          const dur = ((new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()) / 1000).toFixed(1)
+          logger.info(`[MCP] ━━━ TASK ${task.status.toUpperCase()} ━━━ ${effectiveAgent} task:${taskId.slice(0, 8)} in ${dur}s (${task.outputLength} chars)`)
           pruneCompletedTasks()
         }
 
@@ -859,6 +861,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           const definition = workflowEngine.createWorkflow(wfName, workflowSteps)
 
           // Run workflow async
+          logger.info(`[Workflow] ━━━ STARTING "${wfName}" ━━━ ${workflowSteps.length} steps on ${project}`)
+          for (const s of workflowSteps) {
+            logger.info(`[Workflow]   Step: "${s.name}" → agent: ${s.agent}${s.dependsOn?.length ? ` (depends: ${s.dependsOn.join(', ')})` : ''}`)
+          }
+
           const runner = async (agent: string, prompt: string, model?: string) => {
             const agentConfig = config.agents[agent]
             if (!agentConfig) throw new Error(`Unknown agent: ${agent}`)
@@ -868,6 +875,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             const modelId = model ?? agentConfig.defaultModel
             const taskId = randomUUID()
             const showViewer = config.viewer?.enabled ?? false
+            logger.info(`[Workflow] ━━━ STEP RUNNING ━━━ ${agent}/${modelId} task:${taskId.slice(0, 8)}`)
+            logger.info(`[Workflow]   Prompt: "${prompt.slice(0, 100)}"`)
             const result = await runAcpSession(spawnConfig, prompt, modelId, {
               bridgePath,
               agentName: agent,
@@ -875,6 +884,8 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               project: projectPath,
               showViewer,
             })
+            const status = result.error ? 'FAILED' : 'COMPLETED'
+            logger.info(`[Workflow] ━━━ STEP ${status} ━━━ ${agent} task:${taskId.slice(0, 8)} (${(result.output?.length ?? 0)} chars)`)
             return {
               taskId,
               output: result.output,
@@ -882,8 +893,10 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             }
           }
 
-          workflowEngine.execute(definition, runner).catch(err => {
-            logger.error(`[Workflow] "${wfName}" execution error: ${err}`)
+          workflowEngine.execute(definition, runner).then(() => {
+            logger.info(`[Workflow] ━━━ WORKFLOW DONE ━━━ "${wfName}" completed all steps`)
+          }).catch(err => {
+            logger.error(`[Workflow] ━━━ WORKFLOW FAILED ━━━ "${wfName}" error: ${err}`)
           })
 
           return {

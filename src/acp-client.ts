@@ -250,7 +250,7 @@ export async function runAcpSession(
     await viewer.open()
   }
 
-  logger.info(`Spawning ACP adapter: ${config.command} ${config.args.join(' ')}`)
+  logger.info(`[ACP] ▶ Spawning ${options?.agentName ?? config.command} (${modelId ?? 'default'})  cmd: ${config.command} ${config.args.join(' ')}`)
 
   // 1. Spawn the ACP adapter process
   let proc: ChildProcess
@@ -497,7 +497,7 @@ export async function runAcpSession(
     ]) as AcpPromptResult
 
     const stopReason = result.stopReason ?? null
-    logger.info(`ACP prompt completed: stopReason=${stopReason}`)
+    logger.info(`[ACP] ✓ ${options?.agentName ?? 'agent'} completed (stopReason=${stopReason})`)
 
     clearTimeout(timeoutHandle)
     if (sigkillTimer) clearTimeout(sigkillTimer)
