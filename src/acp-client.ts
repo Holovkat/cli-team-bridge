@@ -36,7 +36,8 @@ export interface ToolCallInfo {
 const TASK_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 const INIT_TIMEOUT_MS = 30 * 1000 // 30 seconds for initialize/newSession
 const MAX_STDERR_BYTES = 64 * 1024 // 64KB cap on stderr buffer
-const MAX_OUTPUT_BYTES = 1024 * 1024 // 1MB cap on agent output buffer
+const MAX_OUTPUT_BYTES = 128 * 1024 // 128KB cap on agent output buffer
+const MAX_TOOL_OUTPUT_BYTES = 64 * 1024 // 64KB cap on tool output (diffs, terminal, etc.)
 
 /** Safely kill a process — no-op if already dead */
 function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
@@ -47,6 +48,35 @@ function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
   } catch {
     // Process already dead — ignore
   }
+}
+
+/**
+ * Merge agent message output with tool output.
+ * When agents write files via tool calls instead of returning text,
+ * the tool output contains the real content.
+ */
+function mergeOutput(agentOutput: string, toolOutput: string): string {
+  const agentTrimmed = agentOutput.trim()
+  const toolTrimmed = toolOutput.trim()
+
+  // If agent output is substantial, prefer it
+  if (agentTrimmed.length > 500) {
+    // Still append tool output if it has unique content
+    if (toolTrimmed.length > 100 && !agentTrimmed.includes(toolTrimmed.slice(0, 200))) {
+      return `${agentTrimmed}\n\n--- Tool Output ---\n${toolTrimmed}`
+    }
+    return agentTrimmed
+  }
+
+  // Agent output is thin — tool output is the real content
+  if (toolTrimmed.length > 0) {
+    if (agentTrimmed.length > 0) {
+      return `${agentTrimmed}\n\n--- Tool Output ---\n${toolTrimmed}`
+    }
+    return toolTrimmed
+  }
+
+  return agentTrimmed
 }
 
 /** Race a promise against a timeout */
@@ -118,9 +148,62 @@ export async function runAcpSession(
   options?: AcpSessionOptions,
 ): Promise<AcpResult> {
   let output = ''
+  let toolOutput = '' // Captured from tool calls (file writes, diffs, terminal)
   let stderr = ''
   let timedOut = false
   const toolCalls: ToolCallInfo[] = []
+
+  function appendOutput(text: string) {
+    if (output.length < MAX_OUTPUT_BYTES) {
+      output += text.slice(0, MAX_OUTPUT_BYTES - output.length)
+    }
+  }
+
+  function appendToolOutput(text: string) {
+    if (toolOutput.length < MAX_TOOL_OUTPUT_BYTES) {
+      toolOutput += text.slice(0, MAX_TOOL_OUTPUT_BYTES - toolOutput.length)
+    }
+  }
+
+  /** Tool titles that indicate file-read operations (output is not useful to return) */
+  const READ_TOOL_PATTERNS = /\b(read|cat|view|open|load)\b.*\b(file|content|source)\b/i
+
+  /** Extract text content from tool_call and tool_call_update events */
+  function extractToolContent(update: any) {
+    // Skip raw file-read tool output — it's not useful for orchestrator
+    const title = update.title ?? ''
+    if (READ_TOOL_PATTERNS.test(title)) {
+      return
+    }
+
+    // Content array — text blocks, diffs, terminal output
+    if (Array.isArray(update.content)) {
+      for (const item of update.content) {
+        if (item.type === 'content' && item.content) {
+          if (Array.isArray(item.content)) {
+            for (const c of item.content) {
+              if (c.type === 'text' && c.text) {
+                appendToolOutput(c.text)
+              }
+            }
+          }
+        } else if (item.type === 'diff' && item.diff) {
+          appendToolOutput(`\n[diff: ${item.uri ?? 'unknown'}]\n${item.diff}\n`)
+        } else if (item.type === 'terminal' && item.output) {
+          appendToolOutput(item.output)
+        }
+      }
+    }
+    // rawOutput — only capture if reasonably sized (skip large file dumps)
+    if (update.rawOutput != null) {
+      const raw = typeof update.rawOutput === 'string'
+        ? update.rawOutput
+        : JSON.stringify(update.rawOutput)
+      if (raw.length > 0 && raw.length < 10_000) {
+        appendToolOutput(raw)
+      }
+    }
+  }
 
   logger.info(`Spawning ACP adapter: ${config.command} ${config.args.join(' ')}`)
 
@@ -218,26 +301,30 @@ export async function runAcpSession(
           switch (update.sessionUpdate) {
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
-                if (output.length < MAX_OUTPUT_BYTES) {
-                  output += update.content.text.slice(0, MAX_OUTPUT_BYTES - output.length)
-                }
+                appendOutput(update.content.text)
               }
               break
             case 'agent_thought_chunk':
               // Log thinking but don't include in output
               logger.debug(`[thought] ${update.content?.text?.slice(0, 100)}...`)
               break
-            case 'tool_call':
+            case 'tool_call': {
               toolCalls.push({
                 toolCallId: update.toolCallId,
                 title: update.title,
                 status: update.status,
               })
               logger.debug(`Tool call: ${update.title ?? update.toolCallId}`)
+              // Capture tool call content (file writes, diffs, terminal output)
+              extractToolContent(update)
               break
-            case 'tool_call_update':
+            }
+            case 'tool_call_update': {
               logger.debug(`Tool update: ${update.toolCallId} → ${update.status}`)
+              // Capture tool result content and rawOutput
+              extractToolContent(update)
               break
+            }
             case 'plan':
               logger.debug(`Plan update: ${JSON.stringify(update.entries?.length ?? 0)} entries`)
               break
@@ -344,7 +431,11 @@ export async function runAcpSession(
     // Kill the process gracefully
     safeKill(proc)
 
-    return { output, error: null, timedOut: false, stopReason, toolCalls }
+    // If agent message output is thin but tool output has substance, merge them
+    // This handles agents that write files via tools instead of returning text
+    const finalOutput = mergeOutput(output, toolOutput)
+
+    return { output: finalOutput, error: null, timedOut: false, stopReason, toolCalls }
   } catch (err) {
     clearTimeout(timeoutHandle)
     if (sigkillTimer) clearTimeout(sigkillTimer)

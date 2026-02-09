@@ -384,8 +384,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         const spawnConfig = buildSpawnConfig(effectiveAgent, effectiveAgentConfig)
         spawnConfig.cwd = projectPath
 
+        // Frame prompt — instruct agents to return text output, not write files
+        const framedPrompt = `IMPORTANT: Return your complete response as text output directly. Do NOT write files to disk unless explicitly asked to create a file. Your text response will be captured and returned to the orchestrator.\n\n${prompt}`
+
         // Run async — don't block the MCP response
-        runAcpSession(spawnConfig, prompt, modelId, { bridgePath, agentName: effectiveAgent })
+        runAcpSession(spawnConfig, framedPrompt, modelId, { bridgePath, agentName: effectiveAgent })
           .then((result) => {
             task.status = result.error ? 'failed' : 'completed'
             task.completedAt = new Date().toISOString()
