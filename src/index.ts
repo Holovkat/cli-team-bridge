@@ -13,6 +13,7 @@ import { VERSION } from './version'
 import { withRetry } from './retry'
 import { MessageBus } from './message-bus'
 import { AgentRegistry } from './agent-registry'
+import { MessagingWrapper } from './messaging-wrapper'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -47,9 +48,31 @@ console.error(`Workspace: ${config.workspaceRoot}`)
 console.error(`Config: ${values.config}`)
 
 // Bridge-level messaging infrastructure for shutdown cleanup
+const messagingConfig = config.messaging ?? { enabled: true, failSilently: true }
 const bridgePath = join(config.workspaceRoot, '.claude', 'bridge')
-const bridgeRegistry = new AgentRegistry(bridgePath)
-const bridgeMessageBus = new MessageBus(bridgePath)
+
+// Create messaging components only if enabled
+let bridgeRegistry: AgentRegistry | null = null
+let bridgeMessageBus: MessageBus | null = null
+
+if (messagingConfig.enabled) {
+  try {
+    bridgeRegistry = new AgentRegistry(bridgePath)
+    bridgeMessageBus = new MessageBus(bridgePath)
+    logger.info('[Messaging] Bridge messaging infrastructure initialized')
+  } catch (err) {
+    if (messagingConfig.failSilently) {
+      logger.warn(`[Messaging] Failed to initialize messaging: ${err}`)
+    } else {
+      throw err
+    }
+  }
+} else {
+  logger.info('[Messaging] Bridge messaging is disabled')
+}
+
+// Wrap messaging components with safe wrapper
+const messaging = new MessagingWrapper(bridgeMessageBus, bridgeRegistry, messagingConfig)
 
 // --- MCP Server Mode ---
 if (mode === 'mcp' || mode === 'both') {
@@ -157,11 +180,11 @@ if (mode === 'watcher' || mode === 'both') {
     watcher.stop()
 
     // Graceful agent cleanup — broadcast shutdown, then kill remaining
-    const activeAgents = bridgeRegistry.getActive()
+    const activeAgents = messaging.getActive()
     if (activeAgents.length > 0) {
       logger.info(`Sending shutdown to ${activeAgents.length} active agents...`)
       for (const agent of activeAgents) {
-        bridgeMessageBus.writeMessage('orchestrator', agent.name, 'Bridge shutting down', { type: 'shutdown' })
+        messaging.writeMessage('orchestrator', agent.name, 'Bridge shutting down', { type: 'shutdown' })
         if (agent.pid) {
           try { process.kill(agent.pid, 'SIGTERM') } catch { /* already dead */ }
         }
@@ -173,8 +196,8 @@ if (mode === 'watcher' || mode === 'both') {
             try { process.kill(agent.pid, 'SIGKILL') } catch { /* already dead */ }
           }
         }
-        bridgeRegistry.clear()
-        bridgeMessageBus.cleanupAll()
+        messaging.clear()
+        messaging.cleanupAll()
         process.exit(0)
       }, 5000)
     } else {
@@ -224,14 +247,14 @@ if (mode === 'mcp') {
 
   const mcpShutdown = () => {
     logger.info('MCP shutting down...')
-    const activeAgents = bridgeRegistry.getActive()
+    const activeAgents = messaging.getActive()
     for (const agent of activeAgents) {
       if (agent.pid) {
         try { process.kill(agent.pid, 'SIGTERM') } catch { /* already dead */ }
       }
     }
-    bridgeRegistry.clear()
-    bridgeMessageBus.cleanupAll()
+    messaging.clear()
+    messaging.cleanupAll()
     process.exit(0)
   }
 

@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, fsyncSync, openSync, closeSync } from 'fs'
 import { logger } from './logger'
+import { operationalMetrics } from './metrics'
 import type { AgentRegistryEntry, AgentStatus } from './acp-types'
 
 const HEARTBEAT_INTERVAL_MS = 10_000 // 10s
@@ -53,6 +54,7 @@ export class AgentRegistry {
       renameSync(tempPath, this.registryPath)
     } catch (err) {
       logger.error(`[AgentRegistry] Failed to save registry: ${err}`)
+      operationalMetrics.increment('registrySaveFailures')
       // Don't throw - registry corruption is worse than stale data
       // The next operation will retry with the in-memory state
     }

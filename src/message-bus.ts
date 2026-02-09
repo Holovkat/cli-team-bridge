@@ -2,6 +2,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { logger } from './logger'
+import { operationalMetrics } from './metrics'
 import type { BridgeMessage, TaskRequest, MessageType } from './acp-types'
 
 const MAX_MESSAGES_PER_INBOX = 500
@@ -67,6 +68,7 @@ export class MessageBus {
       logger.debug(`[MessageBus] ${from} → ${to}: ${msg.type} (${msg.id})`)
     } catch (err) {
       logger.error(`[MessageBus] Failed to write message from ${from} to ${to}: ${err}`)
+      operationalMetrics.increment('messageWriteFailures')
       // Re-throw to ensure callers know the message was not delivered
       throw new Error(`Message delivery failed: ${err}`)
     }
@@ -92,6 +94,7 @@ export class MessageBus {
           }
         }
         logger.warn(`[MessageBus] Pruned ${toRemove.length} messages from ${agentName} inbox`)
+        operationalMetrics.increment('messageDropped', toRemove.length)
       }
 
       // Filename: timestamp-uuid.json for natural ordering
@@ -100,6 +103,7 @@ export class MessageBus {
       writeFileSync(filePath, JSON.stringify(msg, null, 2))
     } catch (err) {
       logger.error(`[MessageBus] Failed to write to inbox for ${agentName}: ${err}`)
+      operationalMetrics.increment('messageWriteFailures')
       throw err
     }
   }

@@ -38,7 +38,11 @@ export interface AcpPermissionOption {
 }
 
 export interface AcpPermissionRequest {
-  toolCall?: { title?: string }
+  toolCall?: {
+    title?: string
+    toolName?: string
+    arguments?: Record<string, unknown>
+  }
   options?: AcpPermissionOption[]
 }
 

@@ -13,9 +13,10 @@ import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
 import { VERSION } from './version'
 import { TaskStore } from './persistence'
-import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled } from './metrics'
+import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled, operationalMetrics } from './metrics'
 import { MessageBus } from './message-bus'
 import { AgentRegistry } from './agent-registry'
+import { MessagingWrapper } from './messaging-wrapper'
 import { WorkflowEngine, type WorkflowStep } from './workflow'
 
 interface ActiveTask {
@@ -98,9 +99,29 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
   taskStore.recoverOrphaned()
 
   // Cross-agent messaging infrastructure
+  const messagingConfig = config.messaging ?? { enabled: true, failSilently: true }
   const bridgePath = join(workspaceRoot, '.claude', 'bridge')
-  const messageBus = new MessageBus(bridgePath)
-  const agentRegistry = new AgentRegistry(bridgePath)
+
+  let messageBus: MessageBus | null = null
+  let agentRegistry: AgentRegistry | null = null
+
+  if (messagingConfig.enabled) {
+    try {
+      messageBus = new MessageBus(bridgePath)
+      agentRegistry = new AgentRegistry(bridgePath)
+      logger.info('[MCP] Messaging infrastructure initialized')
+    } catch (err) {
+      if (messagingConfig.failSilently) {
+        logger.warn(`[MCP] Failed to initialize messaging: ${err}`)
+      } else {
+        throw err
+      }
+    }
+  } else {
+    logger.info('[MCP] Messaging is disabled via config')
+  }
+
+  const messaging = new MessagingWrapper(messageBus, agentRegistry, messagingConfig)
   const workflowEngine = new WorkflowEngine()
 
   const server = new Server(
@@ -191,6 +212,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       {
         name: 'get_metrics',
         description: 'Get bridge metrics including task counts, success rates, and per-agent statistics.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
+      {
+        name: 'health_check',
+        description: 'Get bridge health status including active tasks, agent availability, and system readiness.',
         inputSchema: { type: 'object' as const, properties: {} },
       },
       // --- Cross-Agent Messaging Tools (Orchestrator Mode) ---
@@ -435,8 +461,13 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.lastUpdate = task.completedAt
             task.outputLength = (result.output ?? '').length
             const durationMs = new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()
-            if (task.status === 'completed') recordTaskCompleted(effectiveAgent, durationMs)
-            else recordTaskFailed(effectiveAgent, durationMs)
+            if (task.status === 'completed') {
+              recordTaskCompleted(effectiveAgent, durationMs)
+              operationalMetrics.increment('taskCompleted')
+            } else {
+              recordTaskFailed(effectiveAgent, durationMs)
+              operationalMetrics.increment('taskFailed')
+            }
             taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
             logger.info(`[MCP] Task ${taskId} ${task.status}`)
             pruneCompletedTasks()
@@ -446,6 +477,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             task.completedAt = new Date().toISOString()
             task.error = String(err)
             recordTaskFailed(effectiveAgent, Date.now() - new Date(task.startedAt).getTime())
+            operationalMetrics.increment('taskFailed')
             taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
             logger.error(`[MCP] Task ${taskId} error: ${err}`)
             pruneCompletedTasks()
@@ -566,6 +598,46 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
 
       case 'get_metrics': {
         return { content: [{ type: 'text', text: JSON.stringify(getMetricsSummary(), null, 2) }] }
+      }
+
+      case 'health_check': {
+        const runningCount = [...activeTasks.values()].filter(t => t.status === 'running').length
+        const availableAgents: string[] = []
+        const unavailableAgents: string[] = []
+
+        for (const [agentName, agentConfig] of Object.entries(config.agents)) {
+          if (isAgentAvailable(agentConfig)) {
+            availableAgents.push(agentName)
+          } else {
+            unavailableAgents.push(agentName)
+          }
+        }
+
+        const status = availableAgents.length > 0 ? 'healthy' : 'degraded'
+        const healthy = status === 'healthy'
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status,
+              healthy,
+              timestamp: new Date().toISOString(),
+              version: VERSION,
+              active_tasks: runningCount,
+              agents: {
+                available: availableAgents,
+                unavailable: unavailableAgents,
+                total: availableAgents.length + unavailableAgents.length,
+              },
+              limits: {
+                max_concurrent_tasks: 10,
+                max_per_agent: 3,
+                max_active_tasks_total: MAX_ACTIVE_TASKS,
+              },
+            }, null, 2),
+          }],
+        }
       }
 
       // --- Cross-Agent Messaging Handlers ---

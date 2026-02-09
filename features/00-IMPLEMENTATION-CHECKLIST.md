@@ -138,13 +138,14 @@
 **Priority**: P2
 
 ### Tasks
-- [x] 9.1 Per-agent concurrency limits
-- [x] 9.2 Agent health checks with circuit breaker
-- [x] 9.3 Graceful degradation / fallback agent
-- [x] 9.4 Metrics & observability (new `metrics.ts`)
-- [x] 9.5 Streaming progress for long-running tasks
-- [x] 9.6 Multi-team isolation
-- [x] 9.7 Complete config hot-reload
+- [x] 9.1 Per-agent concurrency limits (implemented in `mcp-server.ts` with `MAX_PER_AGENT = 3`)
+- [x] 9.2 Bridge health check (`health_check` MCP tool returns status, agents, limits, timestamp)
+- [~] 9.2b Agent health checks with circuit breaker — **PARTIAL**: Basic agent availability check exists, circuit breaker not implemented
+- [x] 9.3 Graceful degradation / fallback agent (implemented in `assign_task` handler)
+- [x] 9.4 Metrics & observability (`metrics.ts` with task counters, duration tracking, per-agent stats)
+- [ ] 9.5 Streaming progress for long-running tasks — **NOT IMPLEMENTED**
+- [x] 9.6 Multi-team isolation (team parameter in `assign_task`)
+- [x] 9.7 Config hot-reload on SIGHUP (implemented in `index.ts` with config validation and manifest regeneration)
 
 ---
 
@@ -165,8 +166,8 @@
 
 ### Phase 3: Orchestrator Enhancements
 - [x] 10.7 Add messaging tools to orchestrator MCP (`src/mcp-server.ts`)
-- [x] 10.8 Implement workflow engine for task chaining (`src/workflow.ts`)
-- [x] 10.9 Add context injection — prepend unread messages to agent prompts
+- [x] 10.8 Implement workflow engine for task chaining (`src/workflow.ts`) — **includes full DAG support with cycle detection via `detectCycles()`**
+- [~] 10.9 Add context injection — prepend unread messages to agent prompts — **NOT IMPLEMENTED**
 
 ### Phase 4: Lifecycle Management
 - [x] 10.10 Agent heartbeat and dead agent detection
@@ -194,9 +195,15 @@
 | 6 | Cleanup | 8 | 8 | **Complete** |
 | 7 | Production Resilience | 5 | 5 | **Complete** |
 | 8 | Testing | 9 | 9 | **Complete** |
-| 9 | Production P2 | 7 | 7 | **Complete** |
+| 9 | Production P2 | 7 | 6 | **Partial** |
 | 10 | Cross-Agent Messaging | 17 | 13 | **In Progress** |
-| **Total** | | **69** | **65** | **Sprint 10 Testing** |
+| **Total** | | **69** | **64** | **Sprint 9-10 Remaining** |
+
+### Not Implemented / Future Work
+- **9.2b** Circuit breaker for agent health checks (basic health check exists, circuit breaker not implemented)
+- **9.5** Streaming progress for long-running tasks
+- **10.9** Context injection — prepend unread messages to agent prompts
+- **10.14-10.17** Integration and end-to-end tests for messaging
 
 ### Target Scores After All Sprints
 - Security: 32 → **85+**

@@ -11,6 +11,8 @@ import { logger } from './logger'
 import { VERSION } from './version'
 import { AgentRegistry } from './agent-registry'
 import { MessageBus } from './message-bus'
+import { operationalMetrics } from './metrics'
+import { evaluatePermission } from './permission-policy'
 import type {
   AcpInitializeParams,
   AcpInitializeResult,
@@ -253,6 +255,7 @@ export async function runAcpSession(
       stdio: ['pipe', 'pipe', 'pipe'],
     })
   } catch (err) {
+    operationalMetrics.increment('agentSpawnFailures')
     return { output: '', error: `Failed to spawn: ${err}`, timedOut: false, stopReason: null, toolCalls: [] }
   }
 
@@ -277,6 +280,7 @@ export async function runAcpSession(
   let sigkillTimer: ReturnType<typeof setTimeout> | undefined
   const timeoutHandle = setTimeout(() => {
     timedOut = true
+    operationalMetrics.increment('agentTimeouts')
     logger.warn(`ACP session timed out after ${TASK_TIMEOUT_MS}ms, killing process`)
     safeKill(proc, 'SIGTERM')
     sigkillTimer = setTimeout(() => safeKill(proc, 'SIGKILL'), 5000)
@@ -293,32 +297,56 @@ export async function runAcpSession(
     // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
-        // Permission controls: deny destructive operations, prefer allow_once
+        // Permission controls: policy-based allowlist engine
         requestPermission: async (params: AcpPermissionRequest): Promise<AcpPermissionResponse> => {
           const toolTitle = params.toolCall?.title ?? 'unknown'
+          const toolName = params.toolCall?.toolName ?? toolTitle
 
-          // Deny destructive operations
-          const DENIED_PATTERNS = [
-            /rm\s+-rf/i, /git\s+push\s+--force/i, /git\s+reset\s+--hard/i,
-            /DROP\s+TABLE/i, /DELETE\s+FROM/i, /shutdown/i,
-          ]
-          const description = JSON.stringify(params)
-          if (DENIED_PATTERNS.some(p => p.test(description))) {
-            logger.warn(`Permission DENIED (destructive): ${toolTitle}`)
-            const denyOption = params.options?.find((o: AcpPermissionOption) => o.kind === 'deny')
-            return {
-              outcome: { outcome: 'selected', optionId: denyOption?.optionId ?? 'deny' },
+          // Extract arguments from the tool call
+          const args: Record<string, unknown> = {}
+          if (params.toolCall?.arguments) {
+            for (const [key, value] of Object.entries(params.toolCall.arguments)) {
+              args[key] = value
             }
           }
 
-          // Prefer allow_once over allow_always to limit blast radius
-          const allowOnce = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_once')
-          const allowAlways = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_always')
-          const selected = allowOnce ?? allowAlways
+          // Evaluate against permission policy
+          const result = evaluatePermission({
+            toolName,
+            toolTitle,
+            args,
+            projectRoot: config.cwd,
+          })
 
-          logger.info(`Permission GRANTED (${selected?.kind ?? 'fallback'}): ${toolTitle}`)
-          return {
-            outcome: { outcome: 'selected', optionId: selected?.optionId ?? 'allow' },
+          // Handle the permission result
+          switch (result.action) {
+            case 'deny':
+              logger.warn(`Permission DENIED (${result.matchedRule}): ${toolTitle} - ${result.reason}`)
+              const denyOption = params.options?.find((o: AcpPermissionOption) => o.kind === 'deny')
+              return {
+                outcome: { outcome: 'selected', optionId: denyOption?.optionId ?? 'deny' },
+              }
+
+            case 'ask':
+              logger.info(`Permission ASK (${result.matchedRule}): ${toolTitle} - requires user approval`)
+              // Prefer allow_once over allow_always to limit blast radius
+              const allowOnce = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_once')
+              const allowAlways = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_always')
+              const askSelected = allowOnce ?? allowAlways
+              return {
+                outcome: { outcome: 'selected', optionId: askSelected?.optionId ?? 'allow_once' },
+              }
+
+            case 'allow':
+            default:
+              logger.info(`Permission ALLOWED (${result.matchedRule}): ${toolTitle}`)
+              // Prefer allow_once over allow_always to limit blast radius
+              const grantOnce = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_once')
+              const grantAlways = params.options?.find((o: AcpPermissionOption) => o.kind === 'allow_always')
+              const grantSelected = grantOnce ?? grantAlways
+              return {
+                outcome: { outcome: 'selected', optionId: grantSelected?.optionId ?? 'allow' },
+              }
           }
         },
 
