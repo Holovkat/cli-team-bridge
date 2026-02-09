@@ -19,6 +19,7 @@ const mockConfig: BridgeConfig = {
   polling: { intervalMs: 60000 },
   logging: { level: 'info' },
   messaging: { enabled: false, failSilently: true },
+  viewer: { enabled: false },
 }
 
 beforeEach(() => {

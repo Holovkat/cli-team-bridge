@@ -67,6 +67,7 @@
       "strengths": ["multi-model flexibility", "cost optimization", "custom model support"]
     }
   },
+  "viewer": { "enabled": true },
   "permissions": { "autoApprove": true },
   "polling": { "intervalMs": 2000 },
   "logging": { "level": "debug", "file": "./bridge.log" }

@@ -13,6 +13,7 @@ import { AgentRegistry } from './agent-registry'
 import { MessageBus } from './message-bus'
 import { operationalMetrics } from './metrics'
 import { evaluatePermission } from './permission-policy'
+import { SessionViewer } from './session-viewer'
 import type {
   AcpInitializeParams,
   AcpInitializeResult,
@@ -153,6 +154,9 @@ function nodeToWebReadable(nodeStream: Readable): ReadableStream<Uint8Array> {
 export interface AcpSessionOptions {
   bridgePath?: string
   agentName?: string
+  taskId?: string
+  project?: string
+  showViewer?: boolean
 }
 
 export async function runAcpSession(
@@ -231,6 +235,19 @@ export async function runAcpSession(
         appendToolOutput(raw)
       }
     }
+  }
+
+  // Session viewer — opens a Ghostty terminal showing live progress
+  let viewer: SessionViewer | null = null
+  if (options?.showViewer && options?.taskId && options?.agentName) {
+    viewer = new SessionViewer({
+      taskId: options.taskId,
+      agentName: options.agentName,
+      model: modelId ?? 'unknown',
+      project: options.project ?? config.cwd,
+      prompt,
+    })
+    viewer.open()
   }
 
   logger.info(`Spawning ACP adapter: ${config.command} ${config.args.join(' ')}`)
@@ -318,6 +335,8 @@ export async function runAcpSession(
           })
 
           // Handle the permission result
+          viewer?.logPermission(result.action, toolTitle)
+
           switch (result.action) {
             case 'deny':
               logger.warn(`Permission DENIED (${result.matchedRule}): ${toolTitle} - ${result.reason}`)
@@ -356,11 +375,12 @@ export async function runAcpSession(
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
                 appendOutput(update.content.text)
+                viewer?.logOutput(update.content.text)
               }
               break
             case 'agent_thought_chunk':
-              // Log thinking but don't include in output
               logger.debug(`[thought] ${update.content?.text?.slice(0, 100)}...`)
+              viewer?.log('\x1b[90m💭 Thinking\x1b[0m', update.content?.text?.slice(0, 120))
               break
             case 'tool_call': {
               toolCalls.push({
@@ -369,18 +389,19 @@ export async function runAcpSession(
                 status: update.status,
               })
               logger.debug(`Tool call: ${update.title ?? update.toolCallId}`)
-              // Capture tool call content (file writes, diffs, terminal output)
+              viewer?.logToolCall(update.title ?? update.toolCallId, update.status)
               extractToolContent(update)
               break
             }
             case 'tool_call_update': {
               logger.debug(`Tool update: ${update.toolCallId} → ${update.status}`)
-              // Capture tool result content and rawOutput
+              viewer?.logToolCall(update.title ?? update.toolCallId, update.status)
               extractToolContent(update)
               break
             }
             case 'plan':
               logger.debug(`Plan update: ${JSON.stringify(update.entries?.length ?? 0)} entries`)
+              viewer?.log('\x1b[34m📋 Plan\x1b[0m', `${update.entries?.length ?? 0} entries`)
               break
           }
         }) as any,
@@ -493,6 +514,7 @@ export async function runAcpSession(
     // This handles agents that write files via tools instead of returning text
     const finalOutput = mergeOutput(output, toolOutput)
 
+    viewer?.complete('completed', finalOutput.length)
     return { output: finalOutput, error: null, timedOut: false, stopReason, toolCalls }
   } catch (err) {
     clearTimeout(timeoutHandle)
@@ -508,6 +530,7 @@ export async function runAcpSession(
     const errStr = err instanceof Error ? err.message : JSON.stringify(err, null, 2)
     const errorMsg = `ACP session error: ${errStr}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
     logger.error(errorMsg)
+    viewer?.complete(timedOut ? 'timed_out' : 'failed')
     return { output, error: errorMsg, timedOut, stopReason: null, toolCalls }
   }
 }

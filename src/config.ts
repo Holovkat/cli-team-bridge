@@ -35,6 +35,9 @@ const BridgeConfigSchema = z.object({
     enabled: z.boolean().default(true),
     failSilently: z.boolean().default(true),
   }).default({ enabled: true, failSilently: true }),
+  viewer: z.object({
+    enabled: z.boolean().default(false),
+  }).default({ enabled: false }),
 })
 
 /**
@@ -69,6 +72,7 @@ export interface BridgeConfig {
   polling: { intervalMs: number }
   logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
   messaging: { enabled: boolean; failSilently: boolean }
+  viewer: { enabled: boolean }
 }
 
 export async function loadConfig(path: string): Promise<BridgeConfig> {

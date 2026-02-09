@@ -462,7 +462,14 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           pruneCompletedTasks()
         }
 
-        const acpPromise = runAcpSession(spawnConfig, framedPrompt, modelId, { bridgePath, agentName: effectiveAgent })
+        const showViewer = config.viewer?.enabled ?? false
+        const acpPromise = runAcpSession(spawnConfig, framedPrompt, modelId, {
+          bridgePath,
+          agentName: effectiveAgent,
+          taskId,
+          project,
+          showViewer,
+        })
 
         if (waitForResult) {
           // Synchronous mode — block until agent completes or timeout
