@@ -435,8 +435,15 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         const spawnConfig = buildSpawnConfig(effectiveAgent, effectiveAgentConfig)
         spawnConfig.cwd = projectPath
 
-        // Frame prompt — instruct agents to return text output, not write files
-        const framedPrompt = `IMPORTANT: Return your complete response as text output directly. Do NOT write files to disk unless explicitly asked to create a file. Your text response will be captured and returned to the orchestrator.\n\n${prompt}`
+        // Frame prompt — instruct agents to return text output and handle denials gracefully
+        const framedPrompt = [
+          'IMPORTANT INSTRUCTIONS:',
+          '- Return your complete response as text output directly. Do NOT write files to disk unless explicitly asked.',
+          '- If a tool call is DENIED due to permissions, do NOT give up. Try an alternative approach using your available tools (e.g. use Read/ListFiles instead of shell commands). Never fail a task just because one approach was denied.',
+          '- Prefer using built-in tools (Read, ListFiles, Grep, Glob) over shell commands for file operations.',
+          '',
+          prompt,
+        ].join('\n')
 
         /** Finalize task state after ACP session completes */
         const finalizeTask = (result: AcpResult) => {
