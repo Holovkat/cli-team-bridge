@@ -58,13 +58,17 @@
       "cwd": "/Users/tonyholovka/workspace/cli-team-bridge",
       "defaultModel": "custom:kimi-for-coding-[Kimi]-7",
       "models": {
-        "custom:kimi-for-coding-[Kimi]-7": { "flag": "--model", "value": "custom:kimi-for-coding-[Kimi]-7", "provider": "factory" },
-        "claude-opus-4-6": { "flag": "--model", "value": "claude-opus-4-6", "provider": "factory" },
-        "gpt-5.2-codex": { "flag": "--model", "value": "gpt-5.2-codex", "provider": "factory" },
-        "gemini-3-pro": { "flag": "--model", "value": "gemini-3-pro-preview", "provider": "factory" },
-        "glm-4.7": { "flag": "--model", "value": "glm-4.7", "provider": "factory" }
+        "custom:kimi-for-coding-[Kimi]-7": { "flag": "--model", "value": "custom:kimi-for-coding-[Kimi]-7", "provider": "kimi" },
+        "custom:GLM-4.7-[Z.AI Coding Plan]": { "flag": "--model", "value": "custom:GLM-4.7-[Z.AI Coding Plan]", "provider": "z.ai" },
+        "custom:granite4-[Ollama]": { "flag": "--model", "value": "custom:granite4-[Ollama]", "provider": "ollama" },
+        "custom:qwen3-[Ollama]": { "flag": "--model", "value": "custom:qwen3-[Ollama]", "provider": "ollama" },
+        "custom:glm-4.7-flash-[Ollama]": { "flag": "--model", "value": "custom:glm-4.7-flash-[Ollama]", "provider": "ollama" },
+        "custom:nemotron-3-nano-[Ollama]": { "flag": "--model", "value": "custom:nemotron-3-nano-[Ollama]", "provider": "ollama" },
+        "custom:qwen3-vl-32b-instruct-[LM Studio]": { "flag": "--model", "value": "custom:qwen3-vl-32b-instruct-[LM Studio]", "provider": "lm-studio" },
+        "custom:ibm/granite-4-h-tiny-[LM Studio]": { "flag": "--model", "value": "custom:ibm/granite-4-h-tiny-[LM Studio]", "provider": "lm-studio" },
+        "custom:zai-org/glm-4.7-flash-[LM-Studio]": { "flag": "--model", "value": "custom:zai-org/glm-4.7-flash-[LM-Studio]", "provider": "lm-studio" }
       },
-      "strengths": ["multi-model flexibility", "cost optimization", "custom model support"]
+      "strengths": ["code generation", "reasoning", "local models", "custom model support"]
     }
   },
   "viewer": { "enabled": true },
