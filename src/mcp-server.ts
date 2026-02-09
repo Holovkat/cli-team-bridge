@@ -401,8 +401,15 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           }
         }
 
+        // Validate model against agent's configured models
+        const availableModels = Object.keys(effectiveAgentConfig.models)
+        if (model && !availableModels.includes(model)) {
+          logger.warn(`[MCP] Requested model "${model}" not available for ${effectiveAgent}. Available: ${availableModels.join(', ')}. Using default: ${effectiveAgentConfig.defaultModel}`)
+          // Fall back to default instead of failing — the orchestrator may not know which models are valid
+        }
+        const modelId = (model && availableModels.includes(model)) ? model : effectiveAgentConfig.defaultModel
+
         const taskId = randomUUID()
-        const modelId = model ?? effectiveAgentConfig.defaultModel
 
         const task: ActiveTask = {
           id: taskId,
