@@ -8,7 +8,7 @@ import { resolve, sep, join } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { type BridgeConfig, isAgentAvailable, getAvailableModels } from './config'
-import { runAcpSession } from './acp-client'
+import { runAcpSession, type AcpResult } from './acp-client'
 import { buildSpawnConfig } from './agent-adapters'
 import { logger } from './logger'
 import { VERSION } from './version'
@@ -16,7 +16,7 @@ import { TaskStore } from './persistence'
 import { getMetricsSummary, recordTaskAssigned, recordTaskCompleted, recordTaskFailed, recordTaskCancelled, operationalMetrics } from './metrics'
 import { MessageBus } from './message-bus'
 import { AgentRegistry } from './agent-registry'
-import { MessagingWrapper } from './messaging-wrapper'
+// import { MessagingWrapper } from './messaging-wrapper'
 import { WorkflowEngine, type WorkflowStep } from './workflow'
 
 interface ActiveTask {
@@ -55,43 +55,8 @@ function pruneCompletedTasks() {
   }
 }
 
-interface PersistedTask {
-  id: string
-  agent: string
-  model: string
-  project: string
-  prompt: string
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
-  startedAt: string
-  completedAt?: string
-  output?: string
-  error?: string | null
-}
 
-/**
- * Retrieve a task from active tasks or persistent storage.
- * Converts persisted task format to ActiveTask format.
- */
-function getTaskFromStore(taskId: string, taskStore: TaskStore): ActiveTask | undefined {
-  const activeTask = activeTasks.get(taskId)
-  if (activeTask) return activeTask
 
-  const persisted = taskStore.get(taskId) as PersistedTask | undefined
-  if (!persisted) return undefined
-
-  return {
-    id: persisted.id,
-    agent: persisted.agent,
-    model: persisted.model,
-    project: persisted.project,
-    prompt: persisted.prompt,
-    status: persisted.status,
-    startedAt: persisted.startedAt,
-    completedAt: persisted.completedAt,
-    output: persisted.output,
-    error: persisted.error,
-  }
-}
 
 export async function startMcpServer(config: BridgeConfig, workspaceRoot: string) {
   const dbPath = join(workspaceRoot, '.bridge-tasks.db')
@@ -121,7 +86,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
     logger.info('[MCP] Messaging is disabled via config')
   }
 
-  const messaging = new MessagingWrapper(messageBus, agentRegistry, messagingConfig)
+  // MessagingWrapper available for future use: new MessagingWrapper(messageBus, agentRegistry, messagingConfig)
   const workflowEngine = new WorkflowEngine()
 
   const server = new Server(
@@ -146,7 +111,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       {
         name: 'assign_task',
         description:
-          'Assign a coding task to an external agent via ACP. The agent will execute the prompt against the specified project workspace and return results.',
+          'Assign a coding task to an external agent via ACP. By default returns immediately with a task_id for polling. Set wait=true to block until the agent completes and return the result directly.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -170,6 +135,14 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             team: {
               type: 'string',
               description: 'Optional team identifier for task isolation',
+            },
+            wait: {
+              type: 'boolean',
+              description: 'If true, block until the agent completes and return the full result. Default: false (returns task_id for polling).',
+            },
+            timeout_seconds: {
+              type: 'number',
+              description: 'Max seconds to wait when wait=true (default: 300, max: 1800). Ignored when wait=false.',
             },
           },
           required: ['agent', 'prompt', 'project'],
@@ -331,13 +304,19 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'assign_task': {
-        const { agent, prompt, project, model, team } = args as {
+        const { agent, prompt, project, model, team, wait, timeout_seconds } = args as {
           agent: string
           prompt: string
           project: string
           model?: string
           team?: string
+          wait?: boolean
+          timeout_seconds?: number
         }
+        const MAX_WAIT_SECONDS = 1800 // 30 minutes
+        const DEFAULT_WAIT_SECONDS = 300 // 5 minutes
+        const waitForResult = wait === true
+        const waitTimeout = Math.min(timeout_seconds ?? DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS) * 1000
 
         // Validate inputs
         const MAX_PROMPT_LENGTH = 100 * 1024 // 100KB
@@ -451,37 +430,86 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         // Frame prompt — instruct agents to return text output, not write files
         const framedPrompt = `IMPORTANT: Return your complete response as text output directly. Do NOT write files to disk unless explicitly asked to create a file. Your text response will be captured and returned to the orchestrator.\n\n${prompt}`
 
-        // Run async — don't block the MCP response
-        runAcpSession(spawnConfig, framedPrompt, modelId, { bridgePath, agentName: effectiveAgent })
-          .then((result) => {
-            task.status = result.error ? 'failed' : 'completed'
-            task.completedAt = new Date().toISOString()
-            task.output = result.output
-            task.error = result.error
-            task.lastUpdate = task.completedAt
-            task.outputLength = (result.output ?? '').length
-            const durationMs = new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()
-            if (task.status === 'completed') {
-              recordTaskCompleted(effectiveAgent, durationMs)
-              operationalMetrics.increment('taskCompleted')
-            } else {
-              recordTaskFailed(effectiveAgent, durationMs)
-              operationalMetrics.increment('taskFailed')
-            }
-            taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
-            logger.info(`[MCP] Task ${taskId} ${task.status}`)
-            pruneCompletedTasks()
-          })
-          .catch((err) => {
-            task.status = 'failed'
-            task.completedAt = new Date().toISOString()
-            task.error = String(err)
-            recordTaskFailed(effectiveAgent, Date.now() - new Date(task.startedAt).getTime())
+        /** Finalize task state after ACP session completes */
+        const finalizeTask = (result: AcpResult) => {
+          task.status = result.error ? 'failed' : 'completed'
+          task.completedAt = new Date().toISOString()
+          task.output = result.output
+          task.error = result.error
+          task.lastUpdate = task.completedAt
+          task.outputLength = (result.output ?? '').length
+          const durationMs = new Date(task.completedAt!).getTime() - new Date(task.startedAt).getTime()
+          if (task.status === 'completed') {
+            recordTaskCompleted(effectiveAgent, durationMs)
+            operationalMetrics.increment('taskCompleted')
+          } else {
+            recordTaskFailed(effectiveAgent, durationMs)
             operationalMetrics.increment('taskFailed')
-            taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
-            logger.error(`[MCP] Task ${taskId} error: ${err}`)
-            pruneCompletedTasks()
-          })
+          }
+          taskStore.update(taskId, { status: task.status, completedAt: task.completedAt, output: task.output, error: task.error })
+          logger.info(`[MCP] Task ${taskId} ${task.status}`)
+          pruneCompletedTasks()
+        }
+
+        const finalizeError = (err: unknown) => {
+          task.status = 'failed'
+          task.completedAt = new Date().toISOString()
+          task.error = String(err)
+          recordTaskFailed(effectiveAgent, Date.now() - new Date(task.startedAt).getTime())
+          operationalMetrics.increment('taskFailed')
+          taskStore.update(taskId, { status: 'failed', completedAt: task.completedAt, error: task.error })
+          logger.error(`[MCP] Task ${taskId} error: ${err}`)
+          pruneCompletedTasks()
+        }
+
+        const acpPromise = runAcpSession(spawnConfig, framedPrompt, modelId, { bridgePath, agentName: effectiveAgent })
+
+        if (waitForResult) {
+          // Synchronous mode — block until agent completes or timeout
+          logger.info(`[MCP] Task ${taskId}: waiting for result (timeout: ${waitTimeout / 1000}s)`)
+          try {
+            const result = await Promise.race([
+              acpPromise,
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Task timed out after ${waitTimeout / 1000}s`)), waitTimeout),
+              ),
+            ])
+            finalizeTask(result)
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  task_id: taskId,
+                  status: task.status,
+                  agent: effectiveAgent,
+                  model: modelId,
+                  output: task.output ?? '',
+                  error: task.error ?? null,
+                  duration_ms: task.completedAt
+                    ? new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()
+                    : null,
+                }, null, 2),
+              }],
+            }
+          } catch (err) {
+            finalizeError(err)
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  task_id: taskId,
+                  status: 'failed',
+                  agent: effectiveAgent,
+                  error: task.error,
+                }, null, 2),
+              }],
+              isError: true,
+            }
+          }
+        }
+
+        // Async mode (default) — fire and forget, return task_id for polling
+        acpPromise.then(finalizeTask).catch(finalizeError)
 
         return {
           content: [{
@@ -489,11 +517,11 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             text: JSON.stringify({
               task_id: taskId,
               status: 'running',
-              agent,
+              agent: effectiveAgent,
               model: modelId,
               project,
               team: team ?? null,
-              message: `Task assigned. Use get_task_status("${taskId}") to check progress.`,
+              message: `Task assigned. Use get_task_status("${taskId}") to check progress, or set wait=true to block until completion.`,
             }, null, 2),
           }],
         }
@@ -643,6 +671,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       // --- Cross-Agent Messaging Handlers ---
 
       case 'broadcast': {
+        if (!agentRegistry || !messageBus) {
+          return { content: [{ type: 'text', text: 'Messaging not enabled' }], isError: true }
+        }
         const { content } = args as { content: string }
         if (!content) {
           return { content: [{ type: 'text', text: 'Missing required field: content' }], isError: true }
@@ -671,6 +702,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'send_agent_message': {
+        if (!agentRegistry || !messageBus) {
+          return { content: [{ type: 'text', text: 'Messaging not enabled' }], isError: true }
+        }
         const { to, content } = args as { to: string; content: string }
         if (!to || !content) {
           return { content: [{ type: 'text', text: 'Missing required fields: to, content' }], isError: true }
@@ -691,6 +725,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'get_agent_status': {
+        if (!agentRegistry || !messageBus) {
+          return { content: [{ type: 'text', text: 'Messaging not enabled' }], isError: true }
+        }
         const agents = agentRegistry.getAll()
         const deadAgents = agentRegistry.detectDead()
 
@@ -719,6 +756,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'shutdown_agent': {
+        if (!agentRegistry || !messageBus) {
+          return { content: [{ type: 'text', text: 'Messaging not enabled' }], isError: true }
+        }
         const { agent, reason } = args as { agent: string; reason?: string }
         if (!agent) {
           return { content: [{ type: 'text', text: 'Missing required field: agent' }], isError: true }
@@ -742,6 +782,9 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
       }
 
       case 'kill_agent': {
+        if (!agentRegistry) {
+          return { content: [{ type: 'text', text: 'Messaging not enabled' }], isError: true }
+        }
         const { agent } = args as { agent: string }
         if (!agent) {
           return { content: [{ type: 'text', text: 'Missing required field: agent' }], isError: true }

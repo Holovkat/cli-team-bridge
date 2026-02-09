@@ -18,6 +18,7 @@ const mockConfig: BridgeConfig = {
   permissions: { autoApprove: false },
   polling: { intervalMs: 60000 },
   logging: { level: 'info' },
+  messaging: { enabled: false, failSilently: true },
 }
 
 beforeEach(() => {

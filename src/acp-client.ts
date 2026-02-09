@@ -23,7 +23,6 @@ import type {
   AcpPermissionRequest,
   AcpPermissionOption,
   AcpPermissionResponse,
-  AcpSessionUpdate,
   AcpSetSessionModelParams,
 } from './acp-types'
 
@@ -290,15 +289,15 @@ export async function runAcpSession(
     // 3. Create NDJSON stream from child process stdin/stdout
     // Bridge Node.js/Web stream type differences (same as Zed adapters)
     const stream = ndJsonStream(
-      nodeToWebWritable(proc.stdin as Writable) as WritableStream<Uint8Array>,
-      nodeToWebReadable(proc.stdout as Readable) as ReadableStream<Uint8Array>,
+      nodeToWebWritable(proc.stdin as Writable) as any,
+      nodeToWebReadable(proc.stdout as Readable) as any,
     )
 
     // 4. Create ClientSideConnection with our Client implementation
     const connection = new ClientSideConnection(
       (_agent: Agent): Client => ({
         // Permission controls: policy-based allowlist engine
-        requestPermission: async (params: AcpPermissionRequest): Promise<AcpPermissionResponse> => {
+        requestPermission: (async (params: AcpPermissionRequest): Promise<AcpPermissionResponse> => {
           const toolTitle = params.toolCall?.title ?? 'unknown'
           const toolName = params.toolCall?.toolName ?? toolTitle
 
@@ -348,11 +347,11 @@ export async function runAcpSession(
                 outcome: { outcome: 'selected', optionId: grantSelected?.optionId ?? 'allow' },
               }
           }
-        },
+        }) as any,
 
         // Collect streamed output from the agent
-        sessionUpdate: async (notification: { update: AcpSessionUpdate }) => {
-          const update = notification.update
+        sessionUpdate: (async (notification: any) => {
+          const update = notification.update as any
           switch (update.sessionUpdate) {
             case 'agent_message_chunk':
               if (update.content?.type === 'text') {
@@ -384,7 +383,7 @@ export async function runAcpSession(
               logger.debug(`Plan update: ${JSON.stringify(update.entries?.length ?? 0)} entries`)
               break
           }
-        },
+        }) as any,
       }),
       stream,
     )
