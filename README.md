@@ -45,6 +45,15 @@ Each login stores OAuth tokens locally (e.g. `~/.codex/`, `~/.claude/`, `~/.fact
 
 Droid/Factory also supports custom model routing through API keys configured in `~/.factory/settings.json` (e.g. Kimi, Ollama, LM Studio). These are managed by Factory, not the bridge.
 
+## Security
+
+See [docs/SECURITY.md](docs/SECURITY.md) for comprehensive security documentation including:
+- Threat model and attack vectors
+- Filesystem IPC security (.claude/bridge)
+- Agent process security controls
+- Permission policy engine
+- Deployment hardening recommendations
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) v1.2+
