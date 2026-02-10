@@ -14,6 +14,7 @@ import { withRetry } from './retry'
 import { MessageBus } from './message-bus'
 import { AgentRegistry } from './agent-registry'
 import { MessagingWrapper } from './messaging-wrapper'
+import { validateTeamName } from './path-validation'
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -31,6 +32,16 @@ if (mode !== 'mcp' && !values.team) {
   console.error('Usage: bun run src/index.ts --team <team-id> [--config <path>] [--mode watcher|mcp|both]')
   console.error('  --team is required for watcher and both modes')
   process.exit(1)
+}
+
+// Validate team name to prevent path traversal attacks
+if (mode !== 'mcp' && values.team) {
+  try {
+    validateTeamName(values.team)
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
 }
 
 const config = await loadConfig(values.config as string)
@@ -61,9 +72,14 @@ if (messagingConfig.enabled) {
     bridgeMessageBus = new MessageBus(bridgePath)
     logger.info('[Messaging] Bridge messaging infrastructure initialized')
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    const errorStack = err instanceof Error && err.stack ? err.stack : 'no stack trace'
     if (messagingConfig.failSilently) {
-      logger.warn(`[Messaging] Failed to initialize messaging: ${err}`)
+      logger.warn(`[Messaging] Failed to initialize messaging infrastructure: ${errorMsg}`)
+      logger.debug(`[Messaging] Error stack: ${errorStack}`)
     } else {
+      logger.error(`[Messaging] Critical failure initializing messaging: ${errorMsg}`)
+      logger.error(`[Messaging] Stack trace: ${errorStack}`)
       throw err
     }
   }

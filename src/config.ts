@@ -25,7 +25,10 @@ const BridgeConfigSchema = z.object({
   workspaceRoot: z.string(),
   agents: z.record(z.string(), AgentConfigSchema),
   /** Currently unused — reserved for future manual-approval workflow */
-  permissions: z.object({ autoApprove: z.boolean() }),
+  permissions: z.object({
+    autoApprove: z.boolean(),
+    additionalAllowedReadDirs: z.array(z.string()).optional(),
+  }),
   polling: z.object({ intervalMs: z.number().min(500).max(60000) }),
   logging: z.object({
     level: z.enum(['debug', 'info', 'warn', 'error']),
@@ -70,7 +73,7 @@ export interface BridgeConfig {
   workspaceRoot: string
   agents: Record<string, AgentConfig>
   /** Currently unused — reserved for future manual-approval workflow */
-  permissions: { autoApprove: boolean }
+  permissions: { autoApprove: boolean; additionalAllowedReadDirs?: string[] }
   polling: { intervalMs: number }
   logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
   messaging: { enabled: boolean; failSilently: boolean }

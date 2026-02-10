@@ -106,12 +106,21 @@ function matchToolPattern(toolName: string, pattern: ToolPattern): boolean {
 }
 
 /**
- * Default permission rules for safe agent operation
+ * Get default permission rules for safe agent operation.
+ * Call this function with workspaceRoot to get rules with proper path scoping.
  *
  * Rules are evaluated in order - first match wins.
  * Default-deny: if no rule matches, the action is 'deny'.
+ *
+ * @param workspaceRoot - The workspace root directory for path scoping
+ * @param additionalAllowedDirs - Additional directories to allow for file reads (default: [])
+ * @returns Array of permission rules with proper path scoping
  */
-export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
+export function getDefaultPermissionRules(
+  workspaceRoot: string,
+  additionalAllowedDirs: string[] = [],
+): PermissionRule[] {
+  return [
   // === DENY: Destructive git operations ===
   {
     name: 'deny-git-force-push',
@@ -134,8 +143,41 @@ export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
     name: 'deny-rm-rf',
     toolPattern: 'Bash',
     action: 'deny',
-    condition: (args) => /rm\s+.*-rf?\s+/.test(String(args.command || '')) ||
-                         /rm\s+-[a-z]*r[a-z]*f/.test(String(args.command || '')),
+    condition: (args) => {
+      const cmd = String(args.command || '')
+
+      // Check if command contains rm
+      if (!/\brm\b/.test(cmd)) return false
+
+      // Parse the command to detect both recursive and force flags
+      // Split by pipes, semicolons, and logical operators to check only the rm command
+      const commandSegment = cmd.split(/[|;&]/).find(seg => /\brm\b/.test(seg))
+      if (!commandSegment) return false
+
+      // Split into tokens
+      const tokens = commandSegment.trim().split(/\s+/)
+
+      // Track presence of recursive and force flags
+      let hasRecursive = false
+      let hasForce = false
+
+      for (const token of tokens) {
+        // Long form flags
+        if (token === '--recursive') hasRecursive = true
+        if (token === '--force') hasForce = true
+
+        // Short form flags (can be combined like -rf or separate like -r -f)
+        if (token.startsWith('-') && !token.startsWith('--')) {
+          // Check if this is a combined short flag (like -rf, -fr, -rRf, etc.)
+          const flags = token.slice(1) // Remove leading dash
+          if (/[rR]/.test(flags)) hasRecursive = true
+          if (/[fF]/.test(flags)) hasForce = true
+        }
+      }
+
+      // Block if BOTH recursive and force flags are present
+      return hasRecursive && hasForce
+    },
     logMessage: 'Blocked recursive delete',
   },
   {
@@ -218,6 +260,7 @@ export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
     toolPattern: 'Read',
     action: 'allow',
     pathScope: {
+      allowedDirs: [workspaceRoot, '/tmp', ...additionalAllowedDirs],
       blockedPatterns: [
         /\.env$/,
         /\.ssh\//,
@@ -291,22 +334,32 @@ export const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
     action: 'ask',
     logMessage: 'Web search requires approval',
   },
-]
+  ]
+}
+
+/**
+ * Default permission rules for backwards compatibility.
+ * Uses empty workspace root - prefer using getDefaultPermissionRules() with actual workspace root.
+ * @deprecated Use getDefaultPermissionRules(workspaceRoot) instead
+ */
+export const DEFAULT_PERMISSION_RULES: PermissionRule[] = getDefaultPermissionRules('', [])
 
 /**
  * Evaluate a tool call against permission rules
  *
  * @param context - The permission context (tool name, args, project root)
- * @param rules - Array of permission rules to evaluate (defaults to DEFAULT_PERMISSION_RULES)
+ * @param rules - Array of permission rules to evaluate (defaults to rules for context.projectRoot)
  * @returns PermissionResult with action, matched rule name, and reason
  */
 export function evaluatePermission(
   context: PermissionContext,
-  rules: PermissionRule[] = DEFAULT_PERMISSION_RULES,
+  rules?: PermissionRule[],
 ): PermissionResult {
+  // If no rules provided, generate them with the actual workspace root
+  const effectiveRules = rules ?? getDefaultPermissionRules(context.projectRoot)
   const { toolName, args, projectRoot } = context
 
-  for (const rule of rules) {
+  for (const rule of effectiveRules) {
     // Check tool pattern match
     if (!matchToolPattern(toolName, rule.toolPattern)) {
       continue

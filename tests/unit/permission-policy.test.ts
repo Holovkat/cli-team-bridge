@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   evaluatePermission,
   createRuleSet,
+  getDefaultPermissionRules,
   type PermissionContext,
   type PermissionRule,
 } from '../../src/permission-policy'
@@ -52,6 +53,138 @@ describe('Permission Policy Engine', () => {
       const result = evaluatePermission(context)
       expect(result.action).toBe('deny')
       expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm -r -f (split flags)', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -r -f /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm -f -r (reverse order)', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -f -r /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm -fr (alternative ordering)', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -fr /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm --recursive --force', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm --recursive --force /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm --force --recursive', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm --force --recursive /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm with mixed long and short flags', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -r --force /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm with uppercase flags', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -R -f /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should deny rm with flags mixed with other short flags', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -rfv /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('deny-rm-rf')
+    })
+
+    it('should allow rm -r (only recursive)', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -r /some/path' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('ask')
+      expect(result.matchedRule).toBe('ask-bash')
+    })
+
+    it('should allow rm -f (only force)', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -f /some/file' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('ask')
+      expect(result.matchedRule).toBe('ask-bash')
+    })
+
+    it('should allow rm without flags', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm /some/file' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('ask')
+      expect(result.matchedRule).toBe('ask-bash')
+    })
+
+    it('should allow rm with other safe flags', () => {
+      const context: PermissionContext = {
+        toolName: 'Bash',
+        args: { command: 'rm -i -v /some/file' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('ask')
+      expect(result.matchedRule).toBe('ask-bash')
     })
 
     it('should deny dd to disk', () => {
@@ -207,6 +340,83 @@ describe('Permission Policy Engine', () => {
       expect(result.action).toBe('deny')
     })
 
+    it('should deny Read of /etc/passwd', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/etc/passwd' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('allow-read')
+      expect(result.reason).toContain('outside allowed scope')
+    })
+
+    it('should deny Read of /etc/shadow', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/etc/shadow' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('allow-read')
+      expect(result.reason).toContain('outside allowed scope')
+    })
+
+    it('should deny Read of ~/.ssh/id_ed25519', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: `${process.env.HOME}/.ssh/id_ed25519` },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+    })
+
+    it('should deny Read of ~/.ssh/config', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: `${process.env.HOME}/.ssh/config` },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('deny')
+    })
+
+    it('should allow Read of workspace files', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: `${projectRoot}/src/index.ts` },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
+    it('should allow Read of /tmp files', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/tmp/test.txt' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
+    it('should allow Read of relative paths within workspace', () => {
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: 'src/config.ts' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
     it('should allow Write operations', () => {
       const context: PermissionContext = {
         toolName: 'Write',
@@ -354,6 +564,69 @@ describe('Permission Policy Engine', () => {
 
       expect(evaluatePermission(dangerousContext, [rule]).action).toBe('deny')
       expect(evaluatePermission(safeContext, [rule]).action).toBe('deny') // No match, falls to default
+    })
+  })
+
+  describe('path scoping with allowedDirs', () => {
+    it('should allow reads in workspace root', () => {
+      const rules = getDefaultPermissionRules(projectRoot)
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: `${projectRoot}/src/file.ts` },
+        projectRoot,
+      }
+      const result = evaluatePermission(context, rules)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
+    it('should allow reads in /tmp', () => {
+      const rules = getDefaultPermissionRules(projectRoot)
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/tmp/tempfile.txt' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context, rules)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
+    it('should deny reads outside allowed directories', () => {
+      const rules = getDefaultPermissionRules(projectRoot)
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/var/log/system.log' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context, rules)
+      expect(result.action).toBe('deny')
+      expect(result.matchedRule).toBe('allow-read')
+      expect(result.reason).toContain('outside allowed scope')
+    })
+
+    it('should support additional allowed directories', () => {
+      const rules = getDefaultPermissionRules(projectRoot, ['/opt/custom'])
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: '/opt/custom/data.json' },
+        projectRoot,
+      }
+      const result = evaluatePermission(context, rules)
+      expect(result.action).toBe('allow')
+      expect(result.matchedRule).toBe('allow-read')
+    })
+
+    it('should still respect blocked patterns even in allowed dirs', () => {
+      const rules = getDefaultPermissionRules(projectRoot)
+      const context: PermissionContext = {
+        toolName: 'Read',
+        args: { file_path: `${projectRoot}/.env` },
+        projectRoot,
+      }
+      const result = evaluatePermission(context, rules)
+      expect(result.action).toBe('deny')
+      expect(result.reason).toContain('outside allowed scope')
     })
   })
 })

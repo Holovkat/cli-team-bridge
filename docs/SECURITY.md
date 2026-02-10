@@ -1,7 +1,7 @@
 # CLI Team Bridge Security Documentation
 
-**Version:** 0.1.0  
-**Last Updated:** 2026-02-09
+**Version:** 0.2.0  
+**Last Updated:** 2026-02-10
 
 ---
 
@@ -70,6 +70,19 @@ If an agent executable is compromised:
 - **Replay Protection:** Message timestamps with acceptance windows
 - **Integrity:** JSON parsing with validation, corrupted files skipped with warnings
 
+### 2.5 Messaging Limits
+
+**Message Bus Constraints:**
+- Maximum messages per inbox: 500 (oldest pruned when exceeded)
+- Maximum message size: 64KB per message
+- Filename pattern: `{timestamp}-{uuid}.json` for natural ordering
+
+**Agent Registry Limits:**
+- Heartbeat interval: 10 seconds
+- Dead threshold: 30 seconds without heartbeat
+- Automatic dead agent detection via PID check
+- Registry entries pruned when status is 'dead'
+
 ---
 
 ## 3. Agent Process Security
@@ -94,6 +107,9 @@ const ALLOWED_ENV = [
 - No API keys passed directly (agents use their own OAuth)
 - No cloud credentials inherited
 - Minimal attack surface
+- Agent-specific env vars (API keys) only added from config per-agent
+
+**Note:** The bridge only passes the minimal environment needed for system operation. Temporary directory variables (`TMPDIR`, `TEMP`, `TMP`) are included to ensure proper temp file handling.
 
 ### 3.3 Path Traversal Protection
 
@@ -120,8 +136,91 @@ if (!resolvedPath.startsWith(workspaceRoot + sep)) {
 | **ASK** | `Bash`, `FetchURL`, `WebSearch` (logged for audit) |
 
 **Path-based Scoping:**
-- Blocked: `.env`, `.ssh/`, `.aws/`, secrets, keys
-- Allowed: Project directory only
+- **File Reads:** Restricted to workspace root and `/tmp` by default
+  - Additional directories can be configured via `permissions.additionalAllowedReadDirs`
+  - Blocked patterns: `.env`, `.ssh/`, `.aws/`, `.docker/`, `id_rsa`, `id_ed25519`, `.pem`, `.key`, secrets, passwords, tokens
+  - System paths blocked: `/etc/passwd`, `/etc/shadow`, `~/.ssh/*`
+- **File Writes/Edits:** Scoped to project directory
+  - Blocked: `.env`, `.ssh/`, `.aws/`, `/etc/`, `/usr/bin/`, `/bin/`, `.pem`, `.key`
+
+### 3.5 Agent Command Allowlist
+
+Only approved agent adapter binaries can be spawned:
+
+```typescript
+const ALLOWED_COMMANDS = new Set([
+  'codex-acp', 'claude-code-acp', 'droid-acp',
+  'gemini', 'qwen'
+])
+```
+
+- Unknown commands are rejected at config load time
+- Prevents execution of arbitrary binaries via config manipulation
+- ACP agents use the `-acp` suffix naming convention
+
+### 3.6 Resource Limits and Timeouts
+
+**Concurrency Limits:**
+- Maximum 10 concurrent tasks globally
+- Maximum 3 concurrent tasks per agent
+- Maximum 100 active tasks tracked in memory
+- Completed tasks retained for 1 hour
+
+**Timeouts:**
+- Task timeout: 30 minutes (configurable)
+- ACP initialization timeout: 30 seconds
+- Wait mode timeout: 5 minutes default, 30 minutes max
+
+**Input Validation:**
+- Maximum prompt length: 100KB
+- Maximum name length (agent, project, model): 256 characters
+- Control characters blocked in project names
+- UUID format validation for task IDs
+
+### 3.7 Team Isolation
+
+Tasks can be tagged with a `team` identifier for logical isolation:
+
+```json
+{
+  "agent": "droid",
+  "prompt": "Review the code",
+  "project": "my-app",
+  "team": "backend-squad"
+}
+```
+
+- Teams are logical groupings only (not security boundaries)
+- All tasks still execute within the same OS user context
+- Useful for organizing and filtering tasks by organizational unit
+
+### 3.8 Workflow Security
+
+Workflows enable chained task execution across multiple agents:
+
+**Security Considerations:**
+- Each workflow step runs with the same permission policy as standalone tasks
+- Step outputs flow to dependent steps (potential information leakage between agents)
+- No sandboxing between workflow steps
+- Workflow execution is asynchronous and cannot be cancelled once started
+
+**Mitigations:**
+- Path traversal validation on all project paths
+- Permission policy enforced on every tool call within workflow steps
+- Workflow state is in-memory only (not persisted)
+
+### 3.9 Session Viewer Security
+
+The optional Ghostty session viewer displays live agent progress:
+
+**Security Considerations:**
+- Terminal window may expose sensitive file paths or code snippets
+- Output is visible on screen (physical security consideration)
+- No authentication on the viewer itself (relies on OS user session)
+
+**Recommendations:**
+- Disable viewer (`viewer.enabled: false`) in shared environments
+- Use viewer only on physically secured workstations
 
 ---
 
@@ -200,6 +299,9 @@ If transport evolves to HTTP/WebSocket:
 - [x] Permission policy engine
 - [x] Atomic file writes
 - [x] Error propagation (no silent failures)
+- [x] Input validation (length limits, format checks)
+- [x] Resource limits (concurrency, timeouts)
+- [x] Team isolation (logical grouping)
 
 **Short-term (Layer 2):**
 - [ ] Container-based agent isolation

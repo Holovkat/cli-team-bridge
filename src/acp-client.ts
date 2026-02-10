@@ -12,7 +12,7 @@ import { VERSION } from './version'
 import { AgentRegistry } from './agent-registry'
 import { MessageBus } from './message-bus'
 import { operationalMetrics } from './metrics'
-import { evaluatePermission } from './permission-policy'
+import { evaluatePermission, getDefaultPermissionRules } from './permission-policy'
 import { SessionViewer } from './session-viewer'
 import type {
   AcpInitializeParams,
@@ -26,6 +26,19 @@ import type {
   AcpPermissionResponse,
   AcpSetSessionModelParams,
 } from './acp-types'
+import {
+  TASK_TIMEOUT_MS,
+  INIT_TIMEOUT_MS,
+  MAX_STDERR_BYTES,
+  MAX_OUTPUT_BYTES,
+  MAX_TOOL_OUTPUT_BYTES,
+  MAX_RAW_TOOL_OUTPUT_BYTES,
+  MAX_ERROR_STDERR_LENGTH,
+  SUBSTANTIAL_OUTPUT_THRESHOLD,
+  MIN_TOOL_OUTPUT_LENGTH,
+  TOOL_OUTPUT_COMPARISON_LENGTH,
+  SIGKILL_DELAY_MS,
+} from './constants'
 
 export interface AcpSpawnConfig {
   command: string
@@ -40,6 +53,7 @@ export interface AcpResult {
   timedOut: boolean
   stopReason: string | null
   toolCalls: ToolCallInfo[]
+  proc: ChildProcess
 }
 
 export interface ToolCallInfo {
@@ -48,20 +62,15 @@ export interface ToolCallInfo {
   status?: string
 }
 
-const TASK_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
-const INIT_TIMEOUT_MS = 30 * 1000 // 30 seconds for initialize/newSession
-const MAX_STDERR_BYTES = 64 * 1024 // 64KB cap on stderr buffer
-const MAX_OUTPUT_BYTES = 128 * 1024 // 128KB cap on agent output buffer
-const MAX_TOOL_OUTPUT_BYTES = 64 * 1024 // 64KB cap on tool output (diffs, terminal, etc.)
-
 /** Safely kill a process — no-op if already dead */
 function safeKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
   try {
     if (proc.exitCode === null && proc.signalCode === null) {
       proc.kill(signal)
     }
-  } catch {
-    // Process already dead — ignore
+  } catch (err) {
+    // Process already dead or kill failed — log for debugging
+    logger.warn(`[ACP] Failed to send ${signal} to process (pid: ${proc.pid ?? 'unknown'}): ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -75,9 +84,9 @@ function mergeOutput(agentOutput: string, toolOutput: string): string {
   const toolTrimmed = toolOutput.trim()
 
   // If agent output is substantial, prefer it
-  if (agentTrimmed.length > 500) {
+  if (agentTrimmed.length > SUBSTANTIAL_OUTPUT_THRESHOLD) {
     // Still append tool output if it has unique content
-    if (toolTrimmed.length > 100 && !agentTrimmed.includes(toolTrimmed.slice(0, 200))) {
+    if (toolTrimmed.length > MIN_TOOL_OUTPUT_LENGTH && !agentTrimmed.includes(toolTrimmed.slice(0, TOOL_OUTPUT_COMPARISON_LENGTH))) {
       return `${agentTrimmed}\n\n--- Tool Output ---\n${toolTrimmed}`
     }
     return agentTrimmed
@@ -158,6 +167,7 @@ export interface AcpSessionOptions {
   project?: string
   showViewer?: boolean
   viewerMode?: 'tail-logs' | 'mirror-stream'
+  additionalAllowedReadDirs?: string[]
 }
 
 export async function runAcpSession(
@@ -232,7 +242,7 @@ export async function runAcpSession(
       const raw = typeof update.rawOutput === 'string'
         ? update.rawOutput
         : JSON.stringify(update.rawOutput)
-      if (raw.length > 0 && raw.length < 10_000) {
+      if (raw.length > 0 && raw.length < MAX_RAW_TOOL_OUTPUT_BYTES) {
         appendToolOutput(raw)
       }
     }
@@ -274,7 +284,9 @@ export async function runAcpSession(
     })
   } catch (err) {
     operationalMetrics.increment('agentSpawnFailures')
-    return { output: '', error: `Failed to spawn: ${err}`, timedOut: false, stopReason: null, toolCalls: [] }
+    // Return a dummy process object for failed spawns
+    const dummyProc = { kill: () => {}, exitCode: -1, signalCode: null } as any
+    return { output: '', error: `Failed to spawn: ${err}`, timedOut: false, stopReason: null, toolCalls: [], proc: dummyProc }
   }
 
   // 2. Process lifecycle promise — rejects on spawn error or unexpected exit
@@ -301,7 +313,7 @@ export async function runAcpSession(
     operationalMetrics.increment('agentTimeouts')
     logger.warn(`ACP session timed out after ${TASK_TIMEOUT_MS}ms, killing process`)
     safeKill(proc, 'SIGTERM')
-    sigkillTimer = setTimeout(() => safeKill(proc, 'SIGKILL'), 5000)
+    sigkillTimer = setTimeout(() => safeKill(proc, 'SIGKILL'), SIGKILL_DELAY_MS)
   }, TASK_TIMEOUT_MS)
 
   try {
@@ -329,12 +341,17 @@ export async function runAcpSession(
           }
 
           // Evaluate against permission policy
+          // Generate rules with additional allowed directories if specified
+          const rules = options?.additionalAllowedReadDirs
+            ? getDefaultPermissionRules(config.cwd, options.additionalAllowedReadDirs)
+            : undefined // Let evaluatePermission generate default rules
+
           const result = evaluatePermission({
             toolName,
             toolTitle,
             args,
             projectRoot: config.cwd,
-          })
+          }, rules)
 
           // Handle the permission result
           viewer?.logPermission(result.action, toolTitle)
@@ -517,7 +534,7 @@ export async function runAcpSession(
     const finalOutput = mergeOutput(output, toolOutput)
 
     viewer?.complete('completed', finalOutput.length)
-    return { output: finalOutput, error: null, timedOut: false, stopReason, toolCalls }
+    return { output: finalOutput, error: null, timedOut: false, stopReason, toolCalls, proc }
   } catch (err) {
     clearTimeout(timeoutHandle)
     if (sigkillTimer) clearTimeout(sigkillTimer)
@@ -530,9 +547,9 @@ export async function runAcpSession(
     safeKill(proc)
 
     const errStr = err instanceof Error ? err.message : JSON.stringify(err, null, 2)
-    const errorMsg = `ACP session error: ${errStr}${stderr ? `\nstderr: ${stderr.slice(0, 2000)}` : ''}`
+    const errorMsg = `ACP session error: ${errStr}${stderr ? `\nstderr: ${stderr.slice(0, MAX_ERROR_STDERR_LENGTH)}` : ''}`
     logger.error(errorMsg)
     viewer?.complete(timedOut ? 'timed_out' : 'failed')
-    return { output, error: errorMsg, timedOut, stopReason: null, toolCalls }
+    return { output, error: errorMsg, timedOut, stopReason: null, toolCalls, proc }
   }
 }

@@ -4,9 +4,7 @@ import { randomUUID } from 'crypto'
 import { logger } from './logger'
 import { operationalMetrics } from './metrics'
 import type { BridgeMessage, TaskRequest, MessageType } from './acp-types'
-
-const MAX_MESSAGES_PER_INBOX = 500
-const MAX_MESSAGE_SIZE = 64 * 1024 // 64KB per message content
+import { MAX_MESSAGES_PER_INBOX, MAX_MESSAGE_SIZE } from './constants'
 
 export class MessageBus {
   private basePath: string
