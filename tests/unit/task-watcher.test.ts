@@ -19,7 +19,7 @@ const mockConfig: BridgeConfig = {
   polling: { intervalMs: 60000 },
   logging: { level: 'info' },
   messaging: { enabled: false, failSilently: true },
-  viewer: { enabled: false },
+  viewer: { enabled: false, mode: 'tail-logs', interactive: false },
 }
 
 beforeEach(() => {

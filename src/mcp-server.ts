@@ -40,17 +40,18 @@ interface ActiveTask {
 const activeTasks = new Map<string, ActiveTask>()
 const MAX_ACTIVE_TASKS = 100
 const TASK_RETENTION_MS = 60 * 60 * 1000 // 1 hour
+const TASK_GRACE_PERIOD_MS = 5 * 60 * 1000 // 5 minutes - minimum retention
 
 function pruneCompletedTasks() {
   if (activeTasks.size <= MAX_ACTIVE_TASKS) return
   const now = Date.now()
   for (const [id, task] of activeTasks) {
-    if (
-      task.status !== 'running' &&
-      task.completedAt &&
-      now - new Date(task.completedAt).getTime() > TASK_RETENTION_MS
-    ) {
-      activeTasks.delete(id)
+    if (task.status !== 'running' && task.completedAt) {
+      const age = now - new Date(task.completedAt).getTime()
+      // Only prune if older than grace period AND retention period
+      if (age > TASK_GRACE_PERIOD_MS && age > TASK_RETENTION_MS) {
+        activeTasks.delete(id)
+      }
     }
   }
 }
@@ -479,12 +480,14 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
         }
 
         const showViewer = config.viewer?.enabled ?? false
+        const viewerMode = config.viewer?.mode ?? 'tail-logs'
         const acpPromise = runAcpSession(spawnConfig, framedPrompt, modelId, {
           bridgePath,
           agentName: effectiveAgent,
           taskId,
           project,
           showViewer,
+          viewerMode,
         })
 
         if (waitForResult) {
@@ -561,7 +564,13 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
         })()
         if (!task) {
-          return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
+          return {
+            content: [{
+              type: 'text',
+              text: `Task "${task_id}" not found. It may have been pruned or never existed.`
+            }],
+            isError: true,
+          }
         }
         return {
           content: [{
@@ -593,7 +602,13 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
           return { id: persisted.id, agent: persisted.agent, model: persisted.model, project: persisted.project, prompt: persisted.prompt, status: persisted.status, startedAt: persisted.startedAt, completedAt: persisted.completedAt, output: persisted.output, error: persisted.error } as ActiveTask
         })()
         if (!task) {
-          return { content: [{ type: 'text', text: `Task "${task_id}" not found` }], isError: true }
+          return {
+            content: [{
+              type: 'text',
+              text: `Task "${task_id}" not found. It may have been pruned. Check get_task_status first.`
+            }],
+            isError: true,
+          }
         }
         if (task.status === 'running') {
           return {
@@ -889,6 +904,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
             const modelId = model ?? agentConfig.defaultModel
             const taskId = randomUUID()
             const showViewer = config.viewer?.enabled ?? false
+            const viewerMode = config.viewer?.mode ?? 'tail-logs'
             logger.info(`[Workflow] ━━━ STEP RUNNING ━━━ ${agent}/${modelId} task:${taskId.slice(0, 8)}`)
             logger.info(`[Workflow]   Prompt: "${prompt.slice(0, 100)}"`)
             const result = await runAcpSession(spawnConfig, prompt, modelId, {
@@ -897,6 +913,7 @@ export async function startMcpServer(config: BridgeConfig, workspaceRoot: string
               taskId,
               project: projectPath,
               showViewer,
+              viewerMode,
             })
             const status = result.error ? 'FAILED' : 'COMPLETED'
             logger.info(`[Workflow] ━━━ STEP ${status} ━━━ ${agent} task:${taskId.slice(0, 8)} (${(result.output?.length ?? 0)} chars)`)

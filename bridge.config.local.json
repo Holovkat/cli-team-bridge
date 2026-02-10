@@ -71,7 +71,11 @@
       "strengths": ["code generation", "reasoning", "local models", "custom model support"]
     }
   },
-  "viewer": { "enabled": true },
+  "viewer": {
+    "enabled": true,
+    "mode": "mirror-stream",
+    "interactive": false
+  },
   "permissions": { "autoApprove": true },
   "polling": { "intervalMs": 2000 },
   "logging": { "level": "debug", "file": "./bridge.log" }

@@ -157,6 +157,7 @@ export interface AcpSessionOptions {
   taskId?: string
   project?: string
   showViewer?: boolean
+  viewerMode?: 'tail-logs' | 'mirror-stream'
 }
 
 export async function runAcpSession(
@@ -246,6 +247,7 @@ export async function runAcpSession(
       model: modelId ?? 'unknown',
       project: options.project ?? config.cwd,
       prompt,
+      viewerMode: options.viewerMode,
     })
     await viewer.open()
   }

@@ -127,6 +127,7 @@ if (mode === 'watcher' || mode === 'both') {
           agentName: task.owner,
           project: config.workspaceRoot,
           showViewer: config.viewer?.enabled ?? false,
+          viewerMode: config.viewer?.mode ?? 'tail-logs',
         }),
         { maxRetries: 2, baseDelayMs: 5000, maxDelayMs: 30000 },
         `task-${task.id}`,

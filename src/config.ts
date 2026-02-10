@@ -37,7 +37,9 @@ const BridgeConfigSchema = z.object({
   }).default({ enabled: true, failSilently: true }),
   viewer: z.object({
     enabled: z.boolean().default(false),
-  }).default({ enabled: false }),
+    mode: z.enum(['tail-logs', 'mirror-stream']).default('tail-logs'),
+    interactive: z.boolean().default(false), // Reserved for future use
+  }).default({ enabled: false, mode: 'tail-logs', interactive: false }),
 })
 
 /**
@@ -72,7 +74,7 @@ export interface BridgeConfig {
   polling: { intervalMs: number }
   logging: { level: 'debug' | 'info' | 'warn' | 'error'; file?: string }
   messaging: { enabled: boolean; failSilently: boolean }
-  viewer: { enabled: boolean }
+  viewer: { enabled: boolean; mode: 'tail-logs' | 'mirror-stream'; interactive: boolean }
 }
 
 export async function loadConfig(path: string): Promise<BridgeConfig> {

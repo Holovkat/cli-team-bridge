@@ -132,23 +132,38 @@ async function ensureGhosttyOpen(): Promise<void> {
   await ghosttyReady
 }
 
-/** Add a new tmux pane tailing a log file */
-function addTmuxPane(logPath: string, agentName: string): void {
+/** Add a new tmux pane tailing a log file or as a mirror stream */
+function addTmuxPane(logPath: string, agentName: string, mode: 'tail-logs' | 'mirror-stream'): string | null {
   try {
+    const command = mode === 'tail-logs'
+      ? `tail -f "${logPath}"`
+      : `echo "Waiting for agent output..."`
+
     if (!placeholderClaimed) {
       // First agent — replace the placeholder pane
       placeholderClaimed = true
       execFileSync('tmux', ['send-keys', '-t', TMUX_SESSION, 'C-c'], { stdio: 'ignore' })
-      execFileSync('tmux', ['send-keys', '-t', TMUX_SESSION, `tail -f "${logPath}"`, 'Enter'], { stdio: 'ignore' })
+      execFileSync('tmux', ['send-keys', '-t', TMUX_SESSION, command, 'Enter'], { stdio: 'ignore' })
       execFileSync('tmux', ['select-pane', '-t', TMUX_SESSION, '-T', agentName], { stdio: 'ignore' })
     } else {
       // Subsequent agents — split and add new pane
-      execFileSync('tmux', ['split-window', '-t', TMUX_SESSION, `tail -f "${logPath}"`], { stdio: 'ignore' })
+      execFileSync('tmux', ['split-window', '-t', TMUX_SESSION, command], { stdio: 'ignore' })
       execFileSync('tmux', ['select-pane', '-t', TMUX_SESSION, '-T', agentName], { stdio: 'ignore' })
       execFileSync('tmux', ['select-layout', '-t', TMUX_SESSION, 'tiled'], { stdio: 'ignore' })
     }
+
+    // Get the current pane ID
+    try {
+      const paneId = execFileSync('tmux', ['display-message', '-p', '-t', TMUX_SESSION, '#{pane_id}'],
+        { encoding: 'utf8' }).trim()
+      return paneId
+    } catch (err) {
+      logger.warn(`[SessionViewer] Failed to get pane ID: ${err}`)
+      return null
+    }
   } catch (err) {
     logger.warn(`[SessionViewer] Failed to add tmux pane for ${agentName}: ${err}`)
+    return null
   }
 }
 
@@ -158,6 +173,7 @@ export interface SessionViewerOptions {
   model: string
   project: string
   prompt: string
+  viewerMode?: 'tail-logs' | 'mirror-stream'
 }
 
 export class SessionViewer {
@@ -165,11 +181,14 @@ export class SessionViewer {
   private taskId: string
   private agentName: string
   private startTime: number
+  private viewerMode: 'tail-logs' | 'mirror-stream'
+  private paneId: string | null = null
 
   constructor(opts: SessionViewerOptions) {
     this.taskId = opts.taskId
     this.agentName = opts.agentName
     this.startTime = Date.now()
+    this.viewerMode = opts.viewerMode ?? 'tail-logs'
 
     // Ensure log directory exists
     mkdirSync(LOG_DIR, { recursive: true })
@@ -195,12 +214,26 @@ export class SessionViewer {
       await ensureGhosttyOpen()
       // Serialize pane creation so pane counts are accurate
       paneQueue = paneQueue.then(() => {
-        addTmuxPane(this.logPath, this.agentName)
-        logger.info(`[SessionViewer] Added pane for ${this.agentName} (${this.taskId.slice(0, 8)})`)
+        this.paneId = addTmuxPane(this.logPath, this.agentName, this.viewerMode)
+        logger.info(`[SessionViewer] Added pane for ${this.agentName} (${this.taskId.slice(0, 8)}) in ${this.viewerMode} mode`)
       })
       await paneQueue
     } catch (err) {
       logger.warn(`[SessionViewer] Failed to open viewer: ${err}`)
+    }
+  }
+
+  /** Stream text to tmux pane in real-time (mirror-stream mode) */
+  private streamToTmux(text: string): void {
+    if (this.viewerMode === 'mirror-stream' && this.paneId) {
+      try {
+        const escaped = text.replace(/'/g, "'\\''")
+        execFileSync('tmux', ['send-keys', '-t', `${TMUX_SESSION}:${this.agentName}`, '-l', escaped],
+          { stdio: 'ignore' })
+      } catch (error) {
+        // Graceful degradation - log but don't crash
+        logger.debug(`[SessionViewer] Failed to stream to tmux: ${error}`)
+      }
     }
   }
 
@@ -214,6 +247,7 @@ export class SessionViewer {
     try {
       appendFileSync(this.logPath, line)
     } catch { /* Don't crash */ }
+    this.streamToTmux(line)
   }
 
   /** Log agent text output */
@@ -221,6 +255,7 @@ export class SessionViewer {
     try {
       appendFileSync(this.logPath, text)
     } catch { /* Don't crash */ }
+    this.streamToTmux(text)
   }
 
   /** Log a tool call event */
@@ -257,6 +292,7 @@ export class SessionViewer {
     try {
       appendFileSync(this.logPath, footer)
     } catch { /* Don't crash */ }
+    this.streamToTmux(footer)
   }
 
   /** Get the log file path */
